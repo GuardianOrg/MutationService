@@ -1,25 +1,49 @@
-# 🧬 Forge Mutation Tester
+# 🧬 Forge Testing Suite
 
-An AI-powered CLI tool that combines mutation testing with automatic test generation for Solidity smart contracts. This tool clones your repository, guides you through manual setup, then uses Gambit for mutation testing (excluding test files) and OpenAI to generate Forge tests that cover identified gaps in your test suite.
+An AI-powered CLI tool that provides comprehensive test analysis for Solidity smart contracts. This tool combines **mutation testing** and **coverage analysis** with automatic test generation to improve your test suite quality and coverage.
+
+## Two Powerful Commands
+
+### 🧬 Mutation Testing (`run`)
+Identifies weaknesses in test quality by using Gambit mutation testing and AI-generated tests to kill survived mutations.
+
+### 📊 Coverage Analysis (`coverage`)  
+Analyzes test coverage gaps and generates AI-powered tests to increase coverage percentage and test completeness.
 
 ## Features
 
+### 🧬 Mutation Testing Features
 - 🔍 **Automated Mutation Testing**: Uses Gambit to identify weaknesses in your test suite
-- 🤖 **AI-Powered Test Generation**: Leverages OpenAI to generate Forge tests for survived mutations
-- 🔐 **Private Repository Support**: Works with private repositories using Personal Access Tokens
-- 📊 **Comprehensive Reports**: Generates detailed summaries of mutation testing results
-- 🎯 **Targeted Testing**: Creates tests specifically designed to kill survived mutations
-- ⚡ **Manual Setup Control**: You control dependency installation and project preparation
+- 🎯 **Targeted Test Generation**: Creates tests specifically designed to kill survived mutations
 - 🛡️ **Test File Exclusion**: Only mutates source files, never test files
+- 📊 **Mutation Score Analysis**: Comprehensive reports on mutation testing effectiveness
+
+### 📊 Coverage Analysis Features  
+- 📈 **Smart Coverage Analysis**: Uses `forge coverage` or `hardhat coverage` with LCOV parsing
+- 🧠 **AI-Powered Gap Detection**: Identifies uncovered lines, functions, and branches with importance scoring
+- 🎯 **Targeted Coverage Tests**: Generates tests to hit specific uncovered code paths
+- 📋 **Coverage Strategy Reports**: Detailed recommendations for reaching target coverage
+
+### 🤖 Shared AI Features
+- 🤖 **Advanced Test Generation**: Leverages OpenAI GPT-4 to generate realistic, context-aware tests
+- 🔐 **Private Repository Support**: Works with private repositories using Personal Access Tokens
+- ⚡ **Manual Setup Control**: You control dependency installation and project preparation
+- 📊 **Comprehensive Reports**: Detailed analysis and improvement recommendations
 
 ## Prerequisites
 
+### For Both Commands
 - Node.js 18+ 
 - Git
-- **Solidity compiler (solc) installed globally**
-- Rust/Cargo (for Gambit installation)
 - OpenAI API key
 - **Your project should use Forge (Foundry) or Hardhat**
+
+### Additional for Mutation Testing (`run`)
+- **Solidity compiler (solc) installed globally** (exact version matching your project)
+- Rust/Cargo (for Gambit installation)
+
+### For Coverage Analysis (`coverage`)
+- Working `forge coverage` or `npx hardhat coverage` command in your project
 
 ## Installation
 
@@ -59,12 +83,12 @@ solc --version
 # Should match your project's pragma solidity version
 ```
 
-### 2. Install Mutation Tester
+### 2. Install Forge Testing Suite
 
 ```bash
-# Clone this repository
+# Clone this repository  
 git clone <repository-url>
-cd forge-mutation-tester
+cd forge-testing-suite
 
 # Install dependencies
 npm install
@@ -90,26 +114,50 @@ npm link
 
 ## Usage
 
-### Basic Usage
+### Mutation Testing Command
 
+#### Basic Usage
 ```bash
 forge-mutation-tester run -r https://github.com/user/repo
 ```
 
-### With Private Repository
-
+#### With Private Repository
 ```bash
 forge-mutation-tester run -r https://github.com/user/private-repo -t YOUR_GITHUB_PAT
 ```
 
-### Full Options
-
+#### Full Options
 ```bash
 forge-mutation-tester run \
   -r https://github.com/user/repo \
   -t YOUR_GITHUB_PAT \
   -b main \
-  -o ./generated-tests \
+  -o ./generated-mutation-tests \
+  --openai-key YOUR_OPENAI_KEY \
+  --model gpt-4-turbo-preview \
+  --no-cleanup
+```
+
+### Coverage Analysis Command
+
+#### Basic Usage
+```bash
+forge-mutation-tester coverage -r https://github.com/user/repo
+```
+
+#### With Target Coverage
+```bash
+forge-mutation-tester coverage -r https://github.com/user/repo --target-coverage 95
+```
+
+#### Full Options
+```bash
+forge-mutation-tester coverage \
+  -r https://github.com/user/repo \
+  -t YOUR_GITHUB_PAT \
+  -b main \
+  -o ./generated-coverage-tests \
+  --target-coverage 90 \
   --openai-key YOUR_OPENAI_KEY \
   --model gpt-4-turbo-preview \
   --no-cleanup
@@ -117,23 +165,46 @@ forge-mutation-tester run \
 
 ## What Happens When You Run It
 
+### Mutation Testing (`run` command)
+
 1. **Repository Cloning**: Your repo is cloned automatically
 2. **Setup Instructions**: The tool detects your project type and shows you exactly what commands to run
 3. **Manual Setup**: You run the setup commands in your terminal:
    - **For Forge projects**: `forge install`, `forge build`, `forge test`
    - **For Hardhat projects**: `npm install`, `npx hardhat compile`, `npx hardhat test`
+   - **Solc Installation**: Install exact matching Solidity compiler version
 4. **Confirmation**: Type "yes" when your project is ready
-5. **Automatic Mutation Testing**: The tool handles the rest automatically
+5. **Automatic Mutation Testing**: Gambit runs mutation testing on source files only
+6. **AI Analysis**: Analyzes survived mutations and generates targeted tests
+
+### Coverage Analysis (`coverage` command)
+
+1. **Repository Cloning**: Your repo is cloned automatically
+2. **Setup Instructions**: Shows setup commands for your project type
+3. **Manual Setup**: You run the setup commands in your terminal:
+   - **For Forge projects**: `forge install`, `forge build`, `forge test`, `forge coverage`
+   - **For Hardhat projects**: `npm install`, `npx hardhat compile`, `npx hardhat test`, `npx hardhat coverage`
+4. **Confirmation**: Type "yes" when your project is ready  
+5. **Coverage Analysis**: Runs coverage tools and parses LCOV/output data
+6. **AI Test Generation**: Generates tests targeting uncovered lines, functions, and branches
 
 ## Options
 
+### Shared Options (Both Commands)
 - `-r, --repo <url>` - Git repository URL (required)
 - `-t, --token <token>` - Personal Access Token for private repositories
 - `-b, --branch <branch>` - Branch to test (default: "main")
-- `-o, --output <dir>` - Output directory for generated tests (default: "./generated-tests")
+- `-o, --output <dir>` - Output directory for generated tests
 - `--openai-key <key>` - OpenAI API key (or set OPENAI_API_KEY env var)
 - `--model <model>` - OpenAI model to use (default: "gpt-4-turbo-preview")
 - `--no-cleanup` - Keep cloned repository after testing
+
+### Mutation Testing (`run`) Specific
+- Default output directory: `./generated-tests`
+
+### Coverage Analysis (`coverage`) Specific  
+- `--target-coverage <percentage>` - Target coverage percentage (default: "95")
+- Default output directory: `./generated-coverage-tests`
 
 ## Environment Variables
 
@@ -143,12 +214,14 @@ You can set the following environment variables instead of passing them as optio
 export OPENAI_API_KEY=your_openai_api_key
 ```
 
-## Example Session
+## Example Sessions
+
+### Mutation Testing Example
 
 ```bash
 $ forge-mutation-tester run -r https://github.com/user/my-defi-project
 
-🧬 Forge Mutation Tester
+🧬 Forge Testing Suite - Mutation Testing
 
 Step 1: Cloning repository...
 ✓ Repository cloned
@@ -175,30 +248,17 @@ solc-select install 0.8.26  # Use your project's version
 solc-select use 0.8.26
 export PATH="/Users/$USER/Library/Python/3.9/bin:$PATH"
 
-✅ Requirements:
-  • All dependencies installed
-  • All contracts compile successfully
-  • All existing tests pass
-  • Project is ready for mutation testing
-
-📝 Notes:
-  • Only source .sol files will be mutated (test files excluded)
-  • Gambit will be installed automatically if needed
-  • Make sure you have Rust/Cargo installed for Gambit compilation
-
 ❓ Is your project ready for mutation testing?
 Type "yes" or "y" to continue, anything else to cancel: y
 
 Step 3: Setting up and running mutation tests...
-✓ Gambit configuration created (test files excluded)
 ✓ Mutation testing completed. Found 25 mutations (source files only)
 
 Step 4: Analyzing test gaps...
 ⚠️  Found 8 survived mutations
 
 Step 5: Generating tests to cover gaps...
-Step 6: Saving generated tests...
-Step 7: Generating summary report...
+✓ Generated 3 test files targeting survived mutations
 
 ✅ Mutation testing completed successfully!
 
@@ -212,24 +272,98 @@ Results:
 Output saved to: ./generated-tests
 ```
 
+### Coverage Analysis Example
+
+```bash
+$ forge-mutation-tester coverage -r https://github.com/user/my-defi-project --target-coverage 90
+
+📊 Forge Coverage Analyzer & Test Generator
+
+Step 1: Cloning repository...
+✓ Repository cloned
+
+📋 Step 2: Project Setup Required
+
+📁 Repository cloned to: .coverage-analysis-temp/my-defi-project
+
+🔧 Please complete the following setup steps:
+
+🔨 Detected Forge/Foundry project
+
+Run these commands in your terminal:
+
+cd .coverage-analysis-temp/my-defi-project
+forge install
+forge build
+forge test
+forge coverage
+
+❓ Is your project ready for coverage analysis?
+Type "yes" or "y" to continue, anything else to cancel: y
+
+Step 3: Analyzing current test coverage...
+✓ Parsed coverage: 73.5% using pattern: Total.*?\|\s*([\d.]+)%
+
+📊 Current Coverage Summary:
+  • Overall Coverage: 73.50%
+  • Target Coverage: 90%
+  • Uncovered Lines: 45
+  • Uncovered Functions: 8
+
+⚠️  Coverage gap: 16.50% to reach target
+
+Step 4: Generating tests to increase coverage...
+✓ Generated 4 coverage test files
+
+✅ Coverage analysis completed successfully!
+
+Results:
+  • Current Coverage: 73.50%
+  • Target Coverage: 90%
+  • Generated test files: 4
+  • Uncovered lines addressed: 38
+
+Output saved to: ./generated-coverage-tests
+```
+
 ## Output
 
-The tool generates:
+### Mutation Testing Output
 
-- **Test Files**: Forge test contracts targeting survived mutations
-- **Summary Report**: Markdown file with detailed analysis including:
+- **Mutation Test Files**: Forge test contracts targeting survived mutations
+- **Mutation Summary Report**: Detailed analysis including:
   - Mutation testing statistics
   - Test coverage gaps analysis
   - Recommendations for improvement
   - Description of generated tests
 
-## Example Output Structure
+### Coverage Analysis Output
 
+- **Coverage Test Files**: Forge test contracts targeting uncovered code
+- **Coverage Summary Report**: Detailed analysis including:
+  - Current coverage statistics
+  - Critical gap analysis  
+  - Strategy recommendations for reaching target coverage
+  - Overview of generated tests
+
+## Example Output Structures
+
+### Mutation Testing Output
 ```
 generated-tests/
 ├── Token.mutation.t.sol
 ├── Vault.mutation.t.sol
+├── Admin.mutation.t.sol
 └── mutation-testing-summary.md
+```
+
+### Coverage Analysis Output
+```
+generated-coverage-tests/
+├── Token.coverage.t.sol
+├── Vault.coverage.t.sol
+├── Admin.coverage.t.sol
+└── coverage-analysis-summary.md
 ```
 
 ## Test File Exclusion
@@ -242,9 +376,11 @@ The tool automatically excludes these patterns from mutation testing:
 - `**/Test*.sol` - Files starting with Test
 - `**/*Test.sol` - Files ending with Test
 
-## Supported Mutation Types
+## Analysis Types
 
-The tool tests for various mutation types including:
+### Mutation Testing Types
+
+The mutation testing command tests for various mutation types including:
 
 - Binary operator mutations (e.g., `+` to `-`)
 - Unary operator mutations
@@ -254,19 +390,39 @@ The tool tests for various mutation types including:
 - Conditional boundary mutations
 - Delegate call eliminations
 
+### Coverage Analysis Targets
+
+The coverage analysis command identifies and targets:
+
+- **Uncovered Lines**: Executable code that was never run during tests
+- **Uncovered Functions**: Functions (public, external, internal) that were never called
+- **Uncovered Branches**: Conditional paths (if/else, require/assert, loops) not tested
+- **High-Priority Code**: Critical functions like transfers, access controls, state changes
+- **Edge Cases**: Boundary conditions and error paths often missed in testing
+
 ## Best Practices
 
-1. **Clean Test Suite**: Ensure your existing tests pass before running mutation testing
+### For Both Commands
+1. **Clean Test Suite**: Ensure your existing tests pass before running any analysis
 2. **Manual Control**: You control when dependencies are installed and when the project is ready
 3. **Review Generated Tests**: AI-generated tests should be reviewed before adding to your test suite
-4. **Iterative Improvement**: Run the tool periodically as you develop to maintain high test quality
+4. **Iterative Improvement**: Run the tools periodically as you develop to maintain high test quality
+
+### Mutation Testing Specific
 5. **Source Files Only**: The tool only mutates source contracts, never test files
+6. **Exact Solc Version**: Install the exact Solidity compiler version your project uses
+7. **Quality Over Coverage**: Focus on test quality improvements rather than just coverage percentage
+
+### Coverage Analysis Specific  
+8. **Set Realistic Targets**: Start with achievable coverage targets (80-90%) rather than 100%
+9. **Prioritize Critical Code**: Focus first on coverage of critical business logic and security functions
+10. **Combine with Mutation Testing**: Use both commands together for comprehensive test suite analysis
 
 ## Troubleshooting
 
-### "Failed to invoke solc" Error or Version Mismatch
+### "Failed to invoke solc" Error or Version Mismatch (Mutation Testing)
 
-If you see `Error: Failed to invoke solc` or version mismatch errors, install the **exact** Solidity compiler version your project uses:
+If you see `Error: Failed to invoke solc` or version mismatch errors during mutation testing, install the **exact** Solidity compiler version your project uses:
 
 ```bash
 # Step 1: Check your project's solidity version
@@ -287,6 +443,15 @@ solc --version
 ```
 
 **⚠️ CRITICAL:** The solc version **must match exactly** with your project's `pragma solidity` statement. Version mismatches cause "No such file or directory" errors that are misleading.
+
+### Coverage Command Shows 0.00% Despite Having Tests
+
+If the coverage analysis shows 0.00% coverage but you have working tests:
+
+1. **Check Coverage Tool Works**: Manually run `forge coverage` or `npx hardhat coverage` 
+2. **Verify Output Format**: The tool parses multiple coverage report formats
+3. **Check Project Structure**: Ensure test files are in expected locations (`test/`, `tests/`)
+4. **Dependencies**: Ensure all project dependencies are properly installed
 
 ### Rust/Cargo Installation
 
