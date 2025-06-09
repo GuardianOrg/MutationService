@@ -1,0 +1,1 @@
+{"filename": "package.json", "sourceroot": ".", "skip_validate": true, "outdir": "test_out", "solc": "/Users/aidankaiser/Library/Python/3.9/bin/solc", "num_mutants": 1}

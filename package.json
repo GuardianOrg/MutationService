@@ -1,0 +1,41 @@
+{
+  "name": "forge-mutation-tester",
+  "version": "1.0.0",
+  "description": "AI-powered mutation testing tool that generates Forge tests to cover gaps",
+  "main": "dist/index.js",
+  "bin": {
+    "forge-mutation-tester": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "postbuild": "chmod +x dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "mutation-testing",
+    "solidity",
+    "forge",
+    "gambit",
+    "ai",
+    "testing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/node": "^22.10.5",
+    "@types/yargs": "^17.0.33",
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "dotenv": "^16.4.7",
+    "glob": "^10.4.5",
+    "openai": "^4.77.3",
+    "ora": "^5.4.1",
+    "simple-git": "^3.27.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "yargs": "^17.7.2"
+  }
+}
