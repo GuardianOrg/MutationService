@@ -7,6 +7,25 @@ import { GambitService } from '../services/gambit.service';
 import { AIService } from '../services/ai.service';
 import * as readline from 'readline';
 
+// Helper functions for mutation analysis display
+function getScoreEmoji(score: number): string {
+  if (score >= 90) return '🏆';
+  if (score >= 80) return '🥇';
+  if (score >= 70) return '🥈';
+  if (score >= 60) return '🥉';
+  if (score >= 50) return '⚠️';
+  return '🚨';
+}
+
+function getScoreGrade(score: number): string {
+  if (score >= 90) return 'Grade: A - Exceptional test quality! Your tests are robust and comprehensive.';
+  if (score >= 80) return 'Grade: B - Good test coverage with room for improvement in critical areas.';
+  if (score >= 70) return 'Grade: C - Moderate test quality. Focus on security and edge case testing.';
+  if (score >= 60) return 'Grade: D - Below average. Significant gaps in test coverage detected.';
+  if (score >= 50) return 'Grade: F - Poor test quality. Consider adopting Test-Driven Development.';
+  return 'Grade: F - Critical issues detected. Immediate attention required for production readiness.';
+}
+
 export async function runMutationTest(options: RunOptions): Promise<void> {
   console.log(chalk.bold.blue('\n🧬 Forge Mutation Tester\n'));
   
@@ -44,32 +63,59 @@ export async function runMutationTest(options: RunOptions): Promise<void> {
     await gambitService.setupGambitConfigWithoutDependencies(repoPath);
     const mutationResults = await gambitService.runMutationTestingWithoutSetup(repoPath);
     
-    // Step 4: Analyze survived mutations
+    // Step 4: Analyze mutation testing results
     console.log(chalk.bold('\nStep 4: Analyzing mutation testing results...'));
     
-    const totalMutations = mutationResults.length;
-    const killedMutations = mutationResults.filter(r => r.status === 'killed').length;
-    const survivedMutations = mutationResults.filter(r => r.status === 'survived').length;
-    const errorMutations = mutationResults.filter(r => r.status === 'error').length;
-    const mutationScore = totalMutations > 0 ? (killedMutations / totalMutations) * 100 : 0;
+    const mutationAnalysisResult = await gambitService.generateMutationAnalysis(mutationResults, repoPath);
+    const { guardianScore, analysis, reportMarkdown } = mutationAnalysisResult;
     
-    console.log(chalk.cyan('\n📊 Mutation Testing Results:'));
-    console.log(`  • Total mutations tested: ${totalMutations}`);
-    console.log(`  • Mutations killed by tests: ${killedMutations}`);
-    console.log(`  • Mutations that survived: ${survivedMutations}`);
-    if (errorMutations > 0) {
-      console.log(`  • Mutations with errors: ${errorMutations}`);
+    // Display Guardian Mutation Score and key insights
+    console.log(chalk.bold.blue('\n🛡️ Guardian Mutation Analysis'));
+    console.log(chalk.cyan(`Guardian Mutation Score: ${guardianScore}/100 ${getScoreEmoji(guardianScore)}`));
+    console.log(chalk.dim(`${getScoreGrade(guardianScore)}`));
+    
+    console.log(chalk.cyan('\n📊 Quick Stats:'));
+    console.log(`  • Total mutations tested: ${analysis.summary.totalMutants}`);
+    console.log(`  • Mutations killed: ${analysis.summary.killedMutants} (${analysis.summary.basicMutationScore.toFixed(1)}%)`);
+    console.log(`  • Mutations survived: ${analysis.summary.survivedMutants}`);
+    if (analysis.summary.errorMutants > 0) {
+      console.log(`  • Test errors: ${analysis.summary.errorMutants}`);
     }
-    console.log(`  • Mutation score: ${mutationScore.toFixed(2)}%`);
     
-    if (survivedMutations === 0) {
+    // Show top recommendations immediately
+    if (analysis.recommendations.length > 0) {
+      console.log(chalk.yellow('\n🎯 Top Recommendations:'));
+      analysis.recommendations.slice(0, 3).forEach((rec: string, index: number) => {
+        console.log(chalk.yellow(`  ${index + 1}. ${rec}`));
+      });
+    }
+    
+    // Show critical gaps if any
+    if (analysis.criticalGaps.length > 0) {
+      console.log(chalk.red('\n🚨 Critical Gaps (Immediate Attention Required):'));
+      analysis.criticalGaps.slice(0, 3).forEach((gap: any, index: number) => {
+        console.log(chalk.red(`  ${index + 1}. ${gap.file}:${gap.line} - ${gap.mutationType}`));
+        console.log(chalk.red(`     "${gap.original}" → "${gap.mutated}" (Priority: ${gap.priority})`));
+      });
+    }
+
+    if (analysis.summary.survivedMutants === 0) {
       console.log(chalk.green('\n✅ Excellent! All mutations were killed. Your test suite is comprehensive!'));
       console.log(chalk.green('No gaps detected in your testing coverage.'));
+      
+      // Save the analysis report even for perfect scores
+      await saveMutationAnalysis(reportMarkdown, options.output);
+      console.log(chalk.bold.green('\n✅ Mutation testing completed successfully!\n'));
+      console.log(chalk.cyan('Results:'));
+      console.log(`  • Guardian Mutation Score: ${guardianScore}/100`);
+      console.log(`  • Total mutations: ${mutationResults.length}`);
+      console.log(`  • All mutations killed: 100%`);
+      console.log(`\nDetailed analysis saved to: ${chalk.underline(path.join(options.output, 'guardian-mutation-analysis.md'))}`);
       return;
     }
 
     const survivedMutationResults = mutationResults.filter(r => r.status === 'survived');
-    console.log(chalk.yellow(`\n⚠️  Found ${survivedMutations} survived mutations indicating gaps in test coverage`));
+    console.log(chalk.yellow(`\n⚠️  Found ${analysis.summary.survivedMutants} survived mutations indicating gaps in test coverage`));
 
     // Step 5: Generate tests for gaps
     console.log(chalk.bold('\nStep 5: Generating tests to cover gaps...'));
@@ -80,20 +126,31 @@ export async function runMutationTest(options: RunOptions): Promise<void> {
     console.log(chalk.bold('\nStep 6: Saving generated tests...'));
     await saveGeneratedTests(generatedTests, options.output);
 
-    // Step 7: Generate and save summary
-    console.log(chalk.bold('\nStep 7: Generating summary report...'));
+    // Step 7: Save mutation analysis report
+    console.log(chalk.bold('\nStep 7: Saving mutation analysis report...'));
+    await saveMutationAnalysis(reportMarkdown, options.output);
+
+    // Step 8: Generate and save summary
+    console.log(chalk.bold('\nStep 8: Generating summary report...'));
     const summary = await aiService.generateSummary(mutationResults, generatedTests);
     await saveSummary(summary, options.output);
 
     // Display results
     console.log(chalk.bold.green('\n✅ Mutation testing completed successfully!\n'));
     console.log(chalk.cyan('Results:'));
+    console.log(`  • Guardian Mutation Score: ${guardianScore}/100 ${getScoreEmoji(guardianScore)}`);
     console.log(`  • Total mutations: ${mutationResults.length}`);
     console.log(`  • Killed mutations: ${mutationResults.filter((r: any) => r.status === 'killed').length}`);
-    console.log(`  • Survived mutations: ${survivedMutations}`);
-    console.log(`  • Mutation score: ${mutationScore.toFixed(2)}%`);
+    console.log(`  • Survived mutations: ${analysis.summary.survivedMutants}`);
+    console.log(`  • Basic mutation score: ${analysis.summary.basicMutationScore.toFixed(2)}%`);
     console.log(`  • Generated test files: ${generatedTests.length}`);
     console.log(`\nOutput saved to: ${chalk.underline(options.output)}`);
+    console.log(`Detailed analysis: ${chalk.underline(path.join(options.output, 'guardian-mutation-analysis.md'))}`);
+
+    // Show final recommendations
+    if (analysis.recommendations.length > 3) {
+      console.log(chalk.yellow(`\n💡 See the detailed analysis report for ${analysis.recommendations.length - 3} additional recommendations`));
+    }
 
   } catch (error) {
     console.error(chalk.red('\n❌ Error:'), error);
@@ -207,4 +264,10 @@ async function saveSummary(summary: string, outputDir: string): Promise<void> {
   const summaryPath = path.join(outputDir, 'mutation-testing-summary.md');
   await fs.writeFile(summaryPath, summary);
   console.log(chalk.green(`  ✓ Saved summary report`));
+}
+
+async function saveMutationAnalysis(reportMarkdown: string, outputDir: string): Promise<void> {
+  const analysisPath = path.join(outputDir, 'guardian-mutation-analysis.md');
+  await fs.writeFile(analysisPath, reportMarkdown);
+  console.log(chalk.green(`  ✓ Saved mutation analysis report`));
 } 

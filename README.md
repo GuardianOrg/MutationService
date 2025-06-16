@@ -16,8 +16,10 @@ Analyzes test coverage gaps and generates AI-powered tests to increase coverage 
 - 🔍 **Automated Mutation Testing**: Uses Gambit to identify weaknesses in your test suite
 - 🎯 **Targeted Test Generation**: Creates tests specifically designed to kill survived mutations
 - 🛡️ **Test File Exclusion**: Only mutates source files, never test files
-- 📊 **Mutation Score Analysis**: Comprehensive reports on mutation testing effectiveness
+- 📊 **Guardian Mutation Score**: Advanced scoring system with severity weighting and critical gap analysis
 - ⚡ **Real Test Execution**: Actually runs tests against each mutant to determine kill vs survival
+- 🧠 **Intelligent Analysis**: Comprehensive breakdown by file, mutation type, and severity
+- 📋 **Actionable Insights**: Specific recommendations prioritized by security and business impact
 
 ### 📊 Coverage Analysis Features  
 - 📈 **Smart Coverage Analysis**: Uses `forge coverage` or `hardhat coverage` with LCOV parsing
@@ -120,9 +122,15 @@ npm link
 
 ### Key Metrics
 
-- **Mutation Score**: Percentage of mutants killed by your tests (higher is better)
+- **Guardian Mutation Score**: Advanced scoring system (0-100) that considers:
+  - Basic mutation kill rate (foundation score)
+  - Security-critical mutation severity (higher penalties for security gaps)
+  - File distribution quality (bonus for comprehensive testing across files)
+  - Priority weighting (financial operations, access controls get higher impact)
+- **Basic Mutation Score**: Percentage of mutants killed by your tests (simpler metric)
 - **Killed Mutants**: Mutants that caused tests to fail (indicates good test coverage)
 - **Survived Mutants**: Mutants that didn't break any tests (indicates gaps in test coverage)
+- **Critical Gaps**: High-priority survived mutations requiring immediate attention
 
 ### Coverage Analysis Workflow
 
@@ -274,22 +282,60 @@ Type "yes" or "y" to continue, anything else to cancel: y
 Step 3: Setting up and running mutation tests...
 ✓ Mutation testing completed. Found 25 mutations (source files only)
 
-Step 4: Analyzing test gaps...
-⚠️  Found 8 survived mutations
+Step 4: Analyzing mutation testing results...
+
+🛡️ Guardian Mutation Analysis
+Guardian Mutation Score: 72.5/100 🥈
+Grade: C - Moderate test quality. Focus on security and edge case testing.
+
+📊 Quick Stats:
+  • Total mutations tested: 25
+  • Mutations killed: 17 (68.0%)
+  • Mutations survived: 8
+
+🎯 Top Recommendations:
+  1. 🎯 Focus on src/Token.sol: Has 4 survived mutations (60.0% kill rate)
+  2. ⚠️  require-mutation mutations need attention: 3 survived (severity: 5/5)
+  3. 🛡️  Security concern: 3 security-related mutations survived. Add tests for error conditions and access controls.
+
+🚨 Critical Gaps (Immediate Attention Required):
+  1. src/Token.sol:45 - require-mutation
+     "require(amount > 0)" → "require(true)" (Priority: 70)
+  2. src/Vault.sol:120 - assignment-mutation  
+     "balance = newBalance" → "balance = -1" (Priority: 65)
+  3. src/Token.sol:89 - binary-op-mutation
+     "a + b" → "a - b" (Priority: 45)
+
+⚠️  Found 8 survived mutations indicating gaps in test coverage
 
 Step 5: Generating tests to cover gaps...
 ✓ Generated 3 test files targeting survived mutations
 
+Step 6: Saving generated tests...
+✓ Saved TokenMutation.t.sol
+✓ Saved VaultMutation.t.sol  
+✓ Saved SecurityMutation.t.sol
+
+Step 7: Saving mutation analysis report...
+✓ Saved mutation analysis report
+
+Step 8: Generating summary report...
+✓ Saved summary report
+
 ✅ Mutation testing completed successfully!
 
 Results:
+  • Guardian Mutation Score: 72.5/100 🥈
   • Total mutations: 25
   • Killed mutations: 17
   • Survived mutations: 8
-  • Mutation score: 68.00%
+  • Basic mutation score: 68.00%
   • Generated test files: 3
 
 Output saved to: ./generated-tests
+Detailed analysis: ./generated-tests/guardian-mutation-analysis.md
+
+💡 See the detailed analysis report for 4 additional recommendations
 ```
 
 ### Coverage Analysis Example
@@ -351,6 +397,12 @@ Output saved to: ./generated-coverage-tests
 ### Mutation Testing Output
 
 - **Mutation Test Files**: Forge test contracts targeting survived mutations
+- **Guardian Mutation Analysis Report**: Comprehensive analysis including:
+  - Guardian Mutation Score with severity weighting
+  - Critical gaps requiring immediate attention  
+  - File-by-file performance breakdown
+  - Mutation type analysis with severity levels
+  - Actionable recommendations prioritized by security impact
 - **Mutation Summary Report**: Detailed analysis including:
   - Mutation testing statistics
   - Test coverage gaps analysis
@@ -374,6 +426,7 @@ generated-tests/
 ├── Token.mutation.t.sol
 ├── Vault.mutation.t.sol
 ├── Admin.mutation.t.sol
+├── guardian-mutation-analysis.md
 └── mutation-testing-summary.md
 ```
 

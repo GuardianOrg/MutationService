@@ -620,7 +620,6 @@ export class GambitService {
       // Step 1: Generate all mutants first
       spinner.text = 'Generating mutants for all source files...';
       const allMutants: any[] = [];
-      const mutantToFileMap: Map<number, { sourceFile: string, outputDir: string }> = new Map();
       
       for (let i = 0; i < sourceFiles.length; i++) {
         const sourceFile = sourceFiles[i];
@@ -672,16 +671,8 @@ export class GambitService {
           // Parse mutants from this file's output directory
           let fileMutants: any[] = [];
           try {
-            fileMutants = await this.parseGambitMutants(projectPath, config.outdir);
+            fileMutants = await this.parseGambitMutants(projectPath, config.outdir, sourceFile);
             allMutants.push(...fileMutants);
-            
-            // Map each mutant to its source file and output directory
-            for (const mutant of fileMutants) {
-              mutantToFileMap.set(mutant.id, { 
-                sourceFile: sourceFile, 
-                outputDir: config.outdir 
-              });
-            }
           } catch (parseError) {
             console.log(chalk.yellow(`  Warning: Could not parse mutants for ${sourceFile}: ${parseError}`));
           }
@@ -706,22 +697,16 @@ export class GambitService {
       
       for (let i = 0; i < allMutants.length; i++) {
         const mutant = allMutants[i];
-        const mutantInfo = mutantToFileMap.get(mutant.id);
         
-        if (!mutantInfo) {
-          console.log(chalk.yellow(`  Warning: Could not find mapping for mutant ${mutant.id}`));
-          continue;
-        }
-        
-        console.log(chalk.cyan(`\n🧬 Testing mutant ${i + 1}/${allMutants.length} (ID: ${mutant.id}) in ${mutantInfo.sourceFile}...`));
+        console.log(chalk.cyan(`\n🧬 Testing mutant ${i + 1}/${allMutants.length} (ID: ${mutant.id}) in ${mutant.sourceFile}...`));
         console.log(chalk.dim(`  Mutation: ${mutant.mutationType} at line ${mutant.line}`));
         console.log(chalk.dim(`  Original: "${mutant.original}" → Mutated: "${mutant.mutated}"`));
         
         const mutationResult = await this.testSingleMutant(
           projectPath, 
           mutant, 
-          mutantInfo.sourceFile, 
-          mutantInfo.outputDir,
+          mutant.sourceFile, 
+          mutant.outputDir,
           isForgeProject
         );
         
@@ -856,7 +841,7 @@ export class GambitService {
   /**
    * Parse mutants from Gambit output directory
    */
-  private async parseGambitMutants(projectPath: string, outputDir: string): Promise<any[]> {
+  private async parseGambitMutants(projectPath: string, outputDir: string, sourceFile: string): Promise<any[]> {
     const mutants: any[] = [];
     const gambitOutputDir = path.join(projectPath, outputDir);
     
@@ -880,7 +865,9 @@ export class GambitService {
             line: parseInt(lineStr) || 0,
             column: parseInt(columnStr) || 0,
             original: original.trim(),
-            mutated: mutated.trim()
+            mutated: mutated.trim(),
+            sourceFile: sourceFile,
+            outputDir: outputDir
           });
         }
       }
@@ -945,5 +932,432 @@ export class GambitService {
 
   async getSurvivedMutations(results: MutationResult[]): Promise<MutationResult[]> {
     return results.filter(r => r.status === 'survived');
+  }
+
+  /**
+   * Generate comprehensive mutation analysis with Guardian Mutation Score
+   */
+  async generateMutationAnalysis(results: MutationResult[], projectPath: string): Promise<{
+    guardianScore: number;
+    analysis: {
+      summary: any;
+      byFile: any;
+      byMutationType: any;
+      criticalGaps: any[];
+      recommendations: string[];
+    };
+    reportMarkdown: string;
+  }> {
+    const totalMutants = results.length;
+    const killedMutants = results.filter(r => r.status === 'killed').length;
+    const survivedMutants = results.filter(r => r.status === 'survived').length;
+    const errorMutants = results.filter(r => r.status === 'error').length;
+    
+    const basicMutationScore = totalMutants > 0 ? (killedMutants / totalMutants) * 100 : 0;
+
+    // Calculate Guardian Mutation Score (more nuanced than basic score)
+    const guardianScore = this.calculateGuardianScore(results);
+
+    // Analyze by file
+    const fileAnalysis = this.analyzeByFile(results);
+    
+    // Analyze by mutation type
+    const mutationTypeAnalysis = this.analyzeByMutationType(results);
+    
+    // Identify critical gaps
+    const criticalGaps = this.identifyCriticalGaps(results);
+    
+    // Generate recommendations
+    const recommendations = this.generateRecommendations(results, fileAnalysis, mutationTypeAnalysis);
+
+    const analysis = {
+      summary: {
+        totalMutants,
+        killedMutants,
+        survivedMutants,
+        errorMutants,
+        basicMutationScore,
+        guardianScore
+      },
+      byFile: fileAnalysis,
+      byMutationType: mutationTypeAnalysis,
+      criticalGaps,
+      recommendations
+    };
+
+    // Generate detailed markdown report
+    const reportMarkdown = this.generateMutationReport(analysis);
+
+    return {
+      guardianScore,
+      analysis,
+      reportMarkdown
+    };
+  }
+
+  /**
+   * Calculate Guardian Mutation Score - a more sophisticated scoring system
+   */
+  private calculateGuardianScore(results: MutationResult[]): number {
+    if (results.length === 0) return 0;
+
+    const totalMutants = results.length;
+    const killedMutants = results.filter(r => r.status === 'killed').length;
+    const survivedMutants = results.filter(r => r.status === 'survived');
+
+    // Base score from basic mutation score
+    const baseScore = (killedMutants / totalMutants) * 100;
+
+    // Apply severity penalties for critical survived mutants
+    let severityPenalty = 0;
+    survivedMutants.forEach(mutant => {
+      const severity = this.getMutationSeverity(mutant.mutationType);
+      severityPenalty += severity * 2; // Each critical mutant reduces score more
+    });
+
+    // Apply file distribution bonus (better if mutations are spread across files)
+    const filesWithSurvivedMutants = new Set(survivedMutants.map(m => m.file)).size;
+    const totalFiles = new Set(results.map(m => m.file)).size;
+    const distributionBonus = totalFiles > 1 ? (filesWithSurvivedMutants / totalFiles) * 5 : 0;
+
+    // Calculate final Guardian Score
+    let guardianScore = baseScore - severityPenalty + distributionBonus;
+    
+    // Ensure score is between 0 and 100
+    guardianScore = Math.max(0, Math.min(100, guardianScore));
+
+    return Math.round(guardianScore * 100) / 100; // Round to 2 decimal places
+  }
+
+  /**
+   * Get severity level for mutation types
+   */
+  private getMutationSeverity(mutationType: string): number {
+    const severityMap: { [key: string]: number } = {
+      'require-mutation': 5,           // Critical - security implications
+      'assignment-mutation': 4,        // High - state corruption
+      'binary-op-mutation': 3,        // Medium-High - logic errors
+      'unary-operator-mutation': 3,   // Medium-High - logic errors
+      'swap-arguments-operator-mutation': 4, // High - parameter confusion
+      'delete-expression-mutation': 3, // Medium-High - missing operations
+      'elim-delegate-mutation': 5,    // Critical - security implications
+      'if-cond-mutation': 4,          // High - control flow
+    };
+    
+    return severityMap[mutationType] || 2; // Default medium severity
+  }
+
+  /**
+   * Analyze mutations by file
+   */
+  private analyzeByFile(results: MutationResult[]): any {
+    const fileStats: { [file: string]: { total: number; killed: number; survived: number; score: number } } = {};
+
+    results.forEach(result => {
+      if (!fileStats[result.file]) {
+        fileStats[result.file] = { total: 0, killed: 0, survived: 0, score: 0 };
+      }
+      
+      fileStats[result.file].total++;
+      
+      if (result.status === 'killed') {
+        fileStats[result.file].killed++;
+      } else if (result.status === 'survived') {
+        fileStats[result.file].survived++;
+      }
+    });
+
+    // Calculate scores for each file
+    Object.keys(fileStats).forEach(file => {
+      const stats = fileStats[file];
+      stats.score = stats.total > 0 ? (stats.killed / stats.total) * 100 : 0;
+    });
+
+    // Sort by worst performing files (lowest scores)
+    const sortedFiles = Object.entries(fileStats)
+      .sort(([,a], [,b]) => a.score - b.score)
+      .map(([file, stats]) => ({ file, ...stats }));
+
+    return {
+      byFile: fileStats,
+      worstPerforming: sortedFiles.slice(0, 5), // Top 5 worst files
+      bestPerforming: sortedFiles.slice(-3),    // Top 3 best files
+    };
+  }
+
+  /**
+   * Analyze mutations by type
+   */
+  private analyzeByMutationType(results: MutationResult[]): any {
+    const typeStats: { [type: string]: { total: number; killed: number; survived: number; score: number; severity: number } } = {};
+
+    results.forEach(result => {
+      const type = result.mutationType;
+      if (!typeStats[type]) {
+        typeStats[type] = { 
+          total: 0, 
+          killed: 0, 
+          survived: 0, 
+          score: 0,
+          severity: this.getMutationSeverity(type)
+        };
+      }
+      
+      typeStats[type].total++;
+      
+      if (result.status === 'killed') {
+        typeStats[type].killed++;
+      } else if (result.status === 'survived') {
+        typeStats[type].survived++;
+      }
+    });
+
+    // Calculate scores for each type
+    Object.keys(typeStats).forEach(type => {
+      const stats = typeStats[type];
+      stats.score = stats.total > 0 ? (stats.killed / stats.total) * 100 : 0;
+    });
+
+    // Sort by most problematic (lowest scores, highest severity)
+    const sortedTypes = Object.entries(typeStats)
+      .sort(([,a], [,b]) => (a.score - a.severity * 5) - (b.score - b.severity * 5))
+      .map(([type, stats]) => ({ type, ...stats }));
+
+    return {
+      byType: typeStats,
+      mostProblematic: sortedTypes.slice(0, 3),
+      leastProblematic: sortedTypes.slice(-3),
+    };
+  }
+
+  /**
+   * Identify critical gaps that need immediate attention
+   */
+  private identifyCriticalGaps(results: MutationResult[]): any[] {
+    const survivedMutants = results.filter(r => r.status === 'survived');
+    
+    return survivedMutants
+      .map(mutant => ({
+        ...mutant,
+        severity: this.getMutationSeverity(mutant.mutationType),
+        priority: this.calculateMutantPriority(mutant)
+      }))
+      .sort((a, b) => b.priority - a.priority)
+      .slice(0, 10); // Top 10 most critical gaps
+  }
+
+  /**
+   * Calculate priority score for a mutant based on various factors
+   */
+  private calculateMutantPriority(mutant: MutationResult): number {
+    let priority = this.getMutationSeverity(mutant.mutationType) * 10;
+    
+    // Boost priority for certain patterns
+    if (mutant.original.includes('require') || mutant.original.includes('assert')) {
+      priority += 20; // Security-critical
+    }
+    
+    if (mutant.original.includes('transfer') || mutant.original.includes('send')) {
+      priority += 15; // Financial operations
+    }
+    
+    if (mutant.original.includes('owner') || mutant.original.includes('admin')) {
+      priority += 10; // Access control
+    }
+    
+    return priority;
+  }
+
+  /**
+   * Generate actionable recommendations
+   */
+  private generateRecommendations(results: MutationResult[], fileAnalysis: any, typeAnalysis: any): string[] {
+    const recommendations: string[] = [];
+    const survivedMutants = results.filter(r => r.status === 'survived');
+    
+    if (survivedMutants.length === 0) {
+      recommendations.push("🎉 Excellent! Your test suite caught all mutations. Consider maintaining this quality as you add new features.");
+      return recommendations;
+    }
+
+    // File-based recommendations
+    if (fileAnalysis.worstPerforming.length > 0) {
+      const worstFile = fileAnalysis.worstPerforming[0];
+      recommendations.push(`🎯 Focus on ${worstFile.file}: Has ${worstFile.survived} survived mutations (${worstFile.score.toFixed(1)}% kill rate)`);
+    }
+
+    // Mutation type recommendations
+    const problematicTypes = typeAnalysis.mostProblematic.filter((t: any) => t.survived > 0);
+    if (problematicTypes.length > 0) {
+      const worstType = problematicTypes[0];
+      recommendations.push(`⚠️  ${worstType.type} mutations need attention: ${worstType.survived} survived (severity: ${worstType.severity}/5)`);
+    }
+
+    // Security-focused recommendations
+    const securityMutants = survivedMutants.filter(m => 
+      m.mutationType === 'require-mutation' || 
+      m.mutationType === 'elim-delegate-mutation'
+    );
+    
+    if (securityMutants.length > 0) {
+      recommendations.push(`🛡️  Security concern: ${securityMutants.length} security-related mutations survived. Add tests for error conditions and access controls.`);
+    }
+
+    // Logic recommendations
+    const logicMutants = survivedMutants.filter(m => 
+      m.mutationType === 'binary-op-mutation' || 
+      m.mutationType === 'unary-operator-mutation'
+    );
+    
+    if (logicMutants.length > 0) {
+      recommendations.push(`🧮 Logic testing: ${logicMutants.length} arithmetic/logic mutations survived. Add tests for edge cases and boundary conditions.`);
+    }
+
+    // State change recommendations
+    const stateMutants = survivedMutants.filter(m => 
+      m.mutationType === 'assignment-mutation'
+    );
+    
+    if (stateMutants.length > 0) {
+      recommendations.push(`📊 State verification: ${stateMutants.length} assignment mutations survived. Add assertions to verify state changes in your tests.`);
+    }
+
+    // General recommendations based on score
+    const totalScore = (results.filter(r => r.status === 'killed').length / results.length) * 100;
+    
+    if (totalScore < 50) {
+      recommendations.push("🔴 Critical: Very low mutation score. Consider adopting Test-Driven Development (TDD) practices.");
+    } else if (totalScore < 75) {
+      recommendations.push("🟡 Moderate: Good start! Focus on testing error conditions and edge cases to improve coverage.");
+    } else if (totalScore < 90) {
+      recommendations.push("🟢 Good: Strong test suite! Focus on the specific survived mutations for final improvements.");
+    }
+
+    return recommendations;
+  }
+
+  /**
+   * Generate detailed markdown mutation analysis report
+   */
+  private generateMutationReport(analysis: any): string {
+    const { summary, byFile, byMutationType, criticalGaps, recommendations } = analysis;
+    
+    return `# 🛡️ Guardian Mutation Analysis Report
+
+## 📊 Executive Summary
+
+**Guardian Mutation Score: ${summary.guardianScore}/100** ${this.getScoreEmoji(summary.guardianScore)}
+
+- **Total Mutations Tested:** ${summary.totalMutants}
+- **Mutations Killed:** ${summary.killedMutants} (${summary.basicMutationScore.toFixed(1)}%)
+- **Mutations Survived:** ${summary.survivedMutants}
+- **Test Errors:** ${summary.errorMutants}
+
+### Guardian Score Explanation
+The Guardian Score is an advanced metric that considers not just the percentage of killed mutations, but also:
+- **Severity weighting** - Critical mutations (security, state) penalize the score more
+- **Distribution bonus** - Better scores for comprehensive testing across files
+- **Priority adjustments** - Financial and access control mutations have higher impact
+
+${this.getScoreGrade(summary.guardianScore)}
+
+---
+
+## 🎯 Critical Gaps Requiring Immediate Attention
+
+${criticalGaps.length > 0 ? criticalGaps.slice(0, 5).map((gap: any, index: number) => 
+  `### ${index + 1}. ${gap.file}:${gap.line} (Priority: ${gap.priority})
+- **Mutation Type:** ${gap.mutationType} (Severity: ${gap.severity}/5)
+- **Change:** \`${gap.original}\` → \`${gap.mutated}\`
+- **Impact:** ${this.describeMutationImpact(gap.mutationType)}
+`).join('\n') : '🎉 No critical gaps found! All high-priority mutations were killed by your tests.'}
+
+---
+
+## 📁 File-by-File Analysis
+
+### 🔴 Files Needing Attention
+${byFile.worstPerforming.slice(0, 3).map((file: any) => 
+  `- **${file.file}**: ${file.score.toFixed(1)}% kill rate (${file.survived}/${file.total} survived)`
+).join('\n')}
+
+### ✅ Best Performing Files
+${byFile.bestPerforming.map((file: any) => 
+  `- **${file.file}**: ${file.score.toFixed(1)}% kill rate (${file.killed}/${file.total} killed)`
+).join('\n')}
+
+---
+
+## 🧬 Mutation Type Analysis
+
+${byMutationType.mostProblematic.map((type: any) => 
+  `### ${type.type} (Severity: ${type.severity}/5)
+- **Performance:** ${type.score.toFixed(1)}% kill rate
+- **Breakdown:** ${type.killed} killed, ${type.survived} survived
+- **Impact:** ${this.describeMutationImpact(type.type)}
+`).join('\n')}
+
+---
+
+## 🎯 Actionable Recommendations
+
+${recommendations.map((rec: string, index: number) => `${index + 1}. ${rec}`).join('\n')}
+
+---
+
+## 📈 Next Steps
+
+1. **Immediate Action:** Address the top 3 critical gaps listed above
+2. **Focus Areas:** Prioritize files with the lowest kill rates  
+3. **Test Strategy:** Add tests for the most problematic mutation types
+4. **Validation:** Re-run mutation testing after implementing fixes
+
+---
+
+## 🎖️ Mutation Testing Best Practices
+
+- **Aim for 80%+ Guardian Score** for production-ready code
+- **Prioritize security-related mutations** (require, access control)
+- **Test edge cases and boundary conditions** to catch logic mutations
+- **Verify state changes** in your test assertions
+- **Use descriptive test names** that clearly indicate what behavior is being verified
+
+---
+
+*Report generated by Guardian Mutation Tester • ${new Date().toLocaleString()}*
+`;
+  }
+
+  private getScoreEmoji(score: number): string {
+    if (score >= 90) return '🏆';
+    if (score >= 80) return '🥇';
+    if (score >= 70) return '🥈';
+    if (score >= 60) return '🥉';
+    if (score >= 50) return '⚠️';
+    return '🚨';
+  }
+
+  private getScoreGrade(score: number): string {
+    if (score >= 90) return '**Grade: A** - Exceptional test quality! Your tests are robust and comprehensive.';
+    if (score >= 80) return '**Grade: B** - Good test coverage with room for improvement in critical areas.';
+    if (score >= 70) return '**Grade: C** - Moderate test quality. Focus on security and edge case testing.';
+    if (score >= 60) return '**Grade: D** - Below average. Significant gaps in test coverage detected.';
+    if (score >= 50) return '**Grade: F** - Poor test quality. Consider adopting Test-Driven Development.';
+    return '**Grade: F** - Critical issues detected. Immediate attention required for production readiness.';
+  }
+
+  private describeMutationImpact(mutationType: string): string {
+    const impacts: { [key: string]: string } = {
+      'require-mutation': 'Security vulnerability - validation bypassed',
+      'assignment-mutation': 'State corruption - incorrect value assignments',
+      'binary-op-mutation': 'Logic error - incorrect calculations or comparisons',
+      'unary-operator-mutation': 'Logic error - incorrect unary operations',
+      'swap-arguments-operator-mutation': 'Parameter confusion - arguments in wrong order',
+      'delete-expression-mutation': 'Missing operation - code not executed',
+      'elim-delegate-mutation': 'Security risk - delegation behavior changed',
+      'if-cond-mutation': 'Control flow error - incorrect branching logic'
+    };
+    
+    return impacts[mutationType] || 'Logic or behavior change detected';
   }
 } 
