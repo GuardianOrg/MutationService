@@ -617,13 +617,14 @@ export class GambitService {
         );
       }
       
-      // Process each source file individually
-      const results: MutationResult[] = [];
-      const processResults = [];
+      // Step 1: Generate all mutants first
+      spinner.text = 'Generating mutants for all source files...';
+      const allMutants: any[] = [];
+      const mutantToFileMap: Map<number, { sourceFile: string, outputDir: string }> = new Map();
       
       for (let i = 0; i < sourceFiles.length; i++) {
         const sourceFile = sourceFiles[i];
-        console.log(chalk.cyan(`\n📄 Processing file ${i + 1}/${sourceFiles.length}: ${sourceFile}`));
+        console.log(chalk.cyan(`\n📄 Generating mutants for file ${i + 1}/${sourceFiles.length}: ${sourceFile}`));
         
         try {
           // Configure to process ONE file at a time
@@ -667,52 +668,92 @@ export class GambitService {
           );
           
           console.log(chalk.green(`  ✅ Gambit completed for ${sourceFile}`));
-          if (gambitOutput) {
-            console.log(chalk.dim(`  Output: ${gambitOutput.substring(0, 200)}...`));
-          }
           
-          // Parse results from this file's output directory
-          let fileResults: MutationResult[] = [];
+          // Parse mutants from this file's output directory
+          let fileMutants: any[] = [];
           try {
-            fileResults = await this.parseGambitResults(projectPath, config.outdir);
-            results.push(...fileResults);
+            fileMutants = await this.parseGambitMutants(projectPath, config.outdir);
+            allMutants.push(...fileMutants);
+            
+            // Map each mutant to its source file and output directory
+            for (const mutant of fileMutants) {
+              mutantToFileMap.set(mutant.id, { 
+                sourceFile: sourceFile, 
+                outputDir: config.outdir 
+              });
+            }
           } catch (parseError) {
-            console.log(chalk.yellow(`  Warning: Could not parse results for ${sourceFile}: ${parseError}`));
+            console.log(chalk.yellow(`  Warning: Could not parse mutants for ${sourceFile}: ${parseError}`));
           }
           
           // Clean up config file
           await fs.unlink(configPath);
           
-          processResults.push({
-            file: sourceFile,
-            success: true,
-            outputDir: config.outdir,
-            mutations: fileResults?.length || 0
-          });
-          
         } catch (error: any) {
-          console.log(chalk.red(`  ❌ Failed to process ${sourceFile}: ${error.message}`));
-          processResults.push({
-            file: sourceFile,
-            success: false,
-            error: error.message
-          });
+          console.log(chalk.red(`  ❌ Failed to generate mutants for ${sourceFile}: ${error.message}`));
         }
       }
       
-      // Summary
-      const successful = processResults.filter(r => r.success).length;
-      const failed = processResults.filter(r => !r.success).length;
-      const totalMutations = results.length;
-      
-      console.log(chalk.blue(`\n📊 Mutation Testing Summary:`));
-      console.log(chalk.green(`  ✅ Successfully processed: ${successful} files`));
-      console.log(chalk.cyan(`  🧬 Total mutations generated: ${totalMutations}`));
-      if (failed > 0) {
-        console.log(chalk.red(`  ❌ Failed: ${failed} files`));
+      if (allMutants.length === 0) {
+        throw new Error('No mutants were generated successfully');
       }
       
-      spinner.succeed(chalk.green(`Mutation testing completed. Generated ${totalMutations} mutations across ${successful} files`));
+      console.log(chalk.blue(`\n🧬 Generated ${allMutants.length} mutants across ${sourceFiles.length} files`));
+      console.log(chalk.blue(`\n🧪 Now testing each mutant to see which ones are killed...`));
+      
+      // Step 2: Test each mutant to determine if it's killed or survived
+      const results: MutationResult[] = [];
+      
+      for (let i = 0; i < allMutants.length; i++) {
+        const mutant = allMutants[i];
+        const mutantInfo = mutantToFileMap.get(mutant.id);
+        
+        if (!mutantInfo) {
+          console.log(chalk.yellow(`  Warning: Could not find mapping for mutant ${mutant.id}`));
+          continue;
+        }
+        
+        console.log(chalk.cyan(`\n🧬 Testing mutant ${i + 1}/${allMutants.length} (ID: ${mutant.id}) in ${mutantInfo.sourceFile}...`));
+        console.log(chalk.dim(`  Mutation: ${mutant.mutationType} at line ${mutant.line}`));
+        console.log(chalk.dim(`  Original: "${mutant.original}" → Mutated: "${mutant.mutated}"`));
+        
+        const mutationResult = await this.testSingleMutant(
+          projectPath, 
+          mutant, 
+          mutantInfo.sourceFile, 
+          mutantInfo.outputDir,
+          isForgeProject
+        );
+        
+        results.push(mutationResult);
+        
+        // Show progress
+        const killed = results.filter(r => r.status === 'killed').length;
+        const survived = results.filter(r => r.status === 'survived').length;
+        console.log(chalk.dim(`  Progress: ${killed} killed, ${survived} survived so far`));
+      }
+      
+      // Summary
+      const totalMutations = results.length;
+      const killedMutations = results.filter(r => r.status === 'killed').length;
+      const survivedMutations = results.filter(r => r.status === 'survived').length;
+      const mutationScore = totalMutations > 0 ? (killedMutations / totalMutations) * 100 : 0;
+      
+      console.log(chalk.blue(`\n📊 Mutation Testing Results:`));
+      console.log(chalk.green(`  ✅ Total mutants tested: ${totalMutations}`));
+      console.log(chalk.green(`  💀 Mutants killed: ${killedMutations}`));
+      console.log(chalk.red(`  🧟 Mutants survived: ${survivedMutations}`));
+      console.log(chalk.cyan(`  📈 Mutation score: ${mutationScore.toFixed(2)}%`));
+      
+      if (survivedMutations > 0) {
+        console.log(chalk.yellow(`\n⚠️  Survived mutants indicate gaps in your test suite:`));
+        const survivedResults = results.filter(r => r.status === 'survived');
+        survivedResults.forEach(r => {
+          console.log(chalk.yellow(`  • ${r.file}:${r.line} - ${r.mutationType}: "${r.original}" → "${r.mutated}"`));
+        });
+      }
+      
+      spinner.succeed(chalk.green(`Mutation testing completed! Score: ${mutationScore.toFixed(2)}% (${killedMutations}/${totalMutations} killed)`));
       return results;
     } catch (error: any) {
       spinner.fail(chalk.red('Mutation testing failed'));
@@ -726,6 +767,129 @@ export class GambitService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Test a single mutant by replacing the original file, running tests, and restoring
+   */
+  private async testSingleMutant(
+    projectPath: string, 
+    mutant: any, 
+    originalSourceFile: string, 
+    mutantOutputDir: string,
+    isForgeProject: boolean
+  ): Promise<MutationResult> {
+    const originalFilePath = path.join(projectPath, originalSourceFile);
+    const mutantFilePath = path.join(projectPath, mutantOutputDir, 'mutants', mutant.id.toString(), originalSourceFile);
+    const backupFilePath = `${originalFilePath}.backup`;
+    
+    try {
+      // Step 1: Backup original file
+      await fs.copyFile(originalFilePath, backupFilePath);
+      
+      // Step 2: Replace original with mutant
+      await fs.copyFile(mutantFilePath, originalFilePath);
+      
+      // Step 3: Run tests
+      const testCommand = isForgeProject ? 'forge test' : 'npx hardhat test';
+      console.log(chalk.dim(`    Running: ${testCommand}`));
+      
+      try {
+        const { stdout, stderr } = await execAsync(testCommand, {
+          cwd: projectPath,
+          timeout: 120000, // 2 minute timeout per test
+          maxBuffer: 1024 * 1024 * 5 // 5MB buffer
+        });
+        
+        // If tests pass, mutant survived
+        console.log(chalk.red(`    🧟 SURVIVED - Tests still pass with this mutant`));
+        return {
+          file: originalSourceFile,
+          line: mutant.line || 0,
+          column: mutant.column || 0,
+          mutationType: mutant.mutationType || 'unknown',
+          original: mutant.original || '',
+          mutated: mutant.mutated || '',
+          status: 'survived',
+          testOutput: stdout || ''
+        };
+        
+      } catch (testError: any) {
+        // If tests fail, mutant was killed
+        console.log(chalk.green(`    💀 KILLED - Tests failed with this mutant`));
+        return {
+          file: originalSourceFile,
+          line: mutant.line || 0,
+          column: mutant.column || 0,
+          mutationType: mutant.mutationType || 'unknown',
+          original: mutant.original || '',
+          mutated: mutant.mutated || '',
+          status: 'killed',
+          testOutput: testError.stdout || testError.stderr || ''
+        };
+      }
+      
+    } catch (error: any) {
+      console.log(chalk.yellow(`    ⚠️  ERROR - Could not test mutant: ${error.message}`));
+      return {
+        file: originalSourceFile,
+        line: mutant.line || 0,
+        column: mutant.column || 0,
+        mutationType: mutant.mutationType || 'unknown',
+        original: mutant.original || '',
+        mutated: mutant.mutated || '',
+        status: 'error',
+        testOutput: error.message || ''
+      };
+      
+    } finally {
+      // Step 4: Always restore original file
+      try {
+        await fs.copyFile(backupFilePath, originalFilePath);
+        await fs.unlink(backupFilePath);
+      } catch (restoreError) {
+        console.error(chalk.red(`    ❌ Failed to restore original file: ${restoreError}`));
+      }
+    }
+  }
+
+  /**
+   * Parse mutants from Gambit output directory
+   */
+  private async parseGambitMutants(projectPath: string, outputDir: string): Promise<any[]> {
+    const mutants: any[] = [];
+    const gambitOutputDir = path.join(projectPath, outputDir);
+    
+    try {
+      // Read mutants.log for mutant information
+      const mutantsLogPath = path.join(gambitOutputDir, 'mutants.log');
+      const mutantsLog = await fs.readFile(mutantsLogPath, 'utf-8');
+      const logLines = mutantsLog.trim().split('\n');
+
+      // Parse each line of mutants.log
+      for (const line of logLines) {
+        const parts = line.split(',');
+        if (parts.length >= 6) {
+          const [id, mutationType, file, location, original, mutated] = parts;
+          const [lineStr, columnStr] = location.split(':');
+          
+          mutants.push({
+            id: parseInt(id),
+            mutationType: mutationType,
+            file: file,
+            line: parseInt(lineStr) || 0,
+            column: parseInt(columnStr) || 0,
+            original: original.trim(),
+            mutated: mutated.trim()
+          });
+        }
+      }
+    } catch (error) {
+      console.error(chalk.yellow('Failed to parse Gambit mutants, returning empty list'));
+      return [];
+    }
+
+    return mutants;
   }
 
   private async parseGambitResults(projectPath: string, outputDir?: string): Promise<MutationResult[]> {

@@ -45,19 +45,35 @@ export async function runMutationTest(options: RunOptions): Promise<void> {
     const mutationResults = await gambitService.runMutationTestingWithoutSetup(repoPath);
     
     // Step 4: Analyze survived mutations
-    console.log(chalk.bold('\nStep 4: Analyzing test gaps...'));
-    const survivedMutations = await gambitService.getSurvivedMutations(mutationResults);
+    console.log(chalk.bold('\nStep 4: Analyzing mutation testing results...'));
     
-    if (survivedMutations.length === 0) {
+    const totalMutations = mutationResults.length;
+    const killedMutations = mutationResults.filter(r => r.status === 'killed').length;
+    const survivedMutations = mutationResults.filter(r => r.status === 'survived').length;
+    const errorMutations = mutationResults.filter(r => r.status === 'error').length;
+    const mutationScore = totalMutations > 0 ? (killedMutations / totalMutations) * 100 : 0;
+    
+    console.log(chalk.cyan('\n📊 Mutation Testing Results:'));
+    console.log(`  • Total mutations tested: ${totalMutations}`);
+    console.log(`  • Mutations killed by tests: ${killedMutations}`);
+    console.log(`  • Mutations that survived: ${survivedMutations}`);
+    if (errorMutations > 0) {
+      console.log(`  • Mutations with errors: ${errorMutations}`);
+    }
+    console.log(`  • Mutation score: ${mutationScore.toFixed(2)}%`);
+    
+    if (survivedMutations === 0) {
       console.log(chalk.green('\n✅ Excellent! All mutations were killed. Your test suite is comprehensive!'));
+      console.log(chalk.green('No gaps detected in your testing coverage.'));
       return;
     }
 
-    console.log(chalk.yellow(`\n⚠️  Found ${survivedMutations.length} survived mutations`));
+    const survivedMutationResults = mutationResults.filter(r => r.status === 'survived');
+    console.log(chalk.yellow(`\n⚠️  Found ${survivedMutations} survived mutations indicating gaps in test coverage`));
 
     // Step 5: Generate tests for gaps
     console.log(chalk.bold('\nStep 5: Generating tests to cover gaps...'));
-    const gaps = await aiService.analyzeGaps(survivedMutations, repoPath);
+    const gaps = await aiService.analyzeGaps(survivedMutationResults, repoPath);
     const generatedTests = await aiService.generateTests(gaps, repoPath);
 
     // Step 6: Save generated tests
@@ -74,8 +90,8 @@ export async function runMutationTest(options: RunOptions): Promise<void> {
     console.log(chalk.cyan('Results:'));
     console.log(`  • Total mutations: ${mutationResults.length}`);
     console.log(`  • Killed mutations: ${mutationResults.filter((r: any) => r.status === 'killed').length}`);
-    console.log(`  • Survived mutations: ${survivedMutations.length}`);
-    console.log(`  • Mutation score: ${((mutationResults.filter((r: any) => r.status === 'killed').length / mutationResults.length) * 100).toFixed(2)}%`);
+    console.log(`  • Survived mutations: ${survivedMutations}`);
+    console.log(`  • Mutation score: ${mutationScore.toFixed(2)}%`);
     console.log(`  • Generated test files: ${generatedTests.length}`);
     console.log(`\nOutput saved to: ${chalk.underline(options.output)}`);
 

@@ -17,6 +17,7 @@ Analyzes test coverage gaps and generates AI-powered tests to increase coverage 
 - 🎯 **Targeted Test Generation**: Creates tests specifically designed to kill survived mutations
 - 🛡️ **Test File Exclusion**: Only mutates source files, never test files
 - 📊 **Mutation Score Analysis**: Comprehensive reports on mutation testing effectiveness
+- ⚡ **Real Test Execution**: Actually runs tests against each mutant to determine kill vs survival
 
 ### 📊 Coverage Analysis Features  
 - 📈 **Smart Coverage Analysis**: Uses `forge coverage` or `hardhat coverage` with LCOV parsing
@@ -47,7 +48,7 @@ Analyzes test coverage gaps and generates AI-powered tests to increase coverage 
 
 ## Installation
 
-### 1. Install Solidity Compiler (Required)
+### 1. Install Solidity Compiler (Required for Mutation Testing)
 
 Gambit requires `solc` to be available globally **with the exact version your project uses**.
 
@@ -102,15 +103,34 @@ npm link
 
 ## How It Works
 
-### New Manual Setup Approach
+### Proper Mutation Testing Workflow
 
 1. **Clone Repository**: The tool clones your target repository
 2. **Manual Setup Phase**: You manually install dependencies and ensure tests pass
 3. **User Confirmation**: The tool waits for your confirmation that setup is complete
 4. **Gambit Installation**: Automatically installs Gambit if needed
-5. **Mutation Testing**: Runs mutation testing on **source files only** (test files excluded)
-6. **AI Analysis**: Analyzes survived mutations and generates targeted tests
-7. **Results**: Saves generated tests and comprehensive summary report
+5. **Mutant Generation**: Runs mutation testing on **source files only** (test files excluded)
+6. **Mutation Testing**: For each generated mutant:
+   - Replaces the original source file with the mutant
+   - Runs your existing test suite (`forge test` or `npx hardhat test`)
+   - Determines if the mutant is **killed** (tests fail) or **survived** (tests pass)
+   - Restores the original file
+7. **AI Analysis**: Analyzes survived mutations and generates targeted tests
+8. **Results**: Saves generated tests and comprehensive summary report with mutation scores
+
+### Key Metrics
+
+- **Mutation Score**: Percentage of mutants killed by your tests (higher is better)
+- **Killed Mutants**: Mutants that caused tests to fail (indicates good test coverage)
+- **Survived Mutants**: Mutants that didn't break any tests (indicates gaps in test coverage)
+
+### Coverage Analysis Workflow
+
+1. **Repository Cloning**: Your repo is cloned automatically
+2. **Setup Instructions**: Shows setup commands for your project type
+3. **Manual Setup**: You run the setup commands in your terminal
+4. **Coverage Analysis**: Runs coverage tools and parses LCOV/output data
+5. **AI Test Generation**: Generates tests targeting uncovered lines, functions, and branches
 
 ## Usage
 
@@ -469,24 +489,4 @@ If your project doesn't compile:
 - Verify your Solidity version compatibility
 - Ensure all imports resolve correctly
 - Make sure your tests pass before proceeding
-- Ensure `solc` is available globally (`solc --version` should work)
-
-### OpenAI API Key
-
-Ensure your OpenAI API key has sufficient credits and access to the specified model.
-
-### Memory Issues
-
-For large codebases, you may need to increase Node.js memory:
-
-```bash
-NODE_OPTIONS="--max-old-space-size=4096" forge-mutation-tester run -r <repo>
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-MIT 
+- Ensure `solc` is available globally (`
