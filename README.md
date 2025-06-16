@@ -239,8 +239,17 @@ forge-mutation-tester coverage \
 You can set the following environment variables instead of passing them as options:
 
 ```bash
+# Required: OpenAI API Key
 export OPENAI_API_KEY=your_openai_api_key
+
+# Optional: GitHub Personal Access Token (for private repos)
+export GITHUB_TOKEN=your_github_token
+
+# Optional: Preferred OpenAI Model
+export OPENAI_MODEL=gpt-4-turbo-preview
 ```
+
+**⚠️ Important**: Keep your API keys secure! Never commit them to version control.
 
 ## Example Sessions
 
@@ -543,3 +552,24 @@ If your project doesn't compile:
 - Ensure all imports resolve correctly
 - Make sure your tests pass before proceeding
 - Ensure `solc` is available globally (`
+
+## 📚 Documentation
+
+- **[USAGE.md](./USAGE.md)** - Comprehensive usage guide with examples and troubleshooting
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Instructions for packaging and distributing the tool
+- **[README.md](./README.md)** - This file with overview and quick start
+
+## Quick Installation & Usage
+
+```bash
+# Install globally
+npm install -g forge-mutation-tester
+
+# Set your OpenAI API key  
+export OPENAI_API_KEY="your-key-here"
+
+# Run mutation testing
+forge-mutation-tester run -r https://github.com/user/solidity-project
+
+# For detailed usage instructions, see USAGE.md
+```

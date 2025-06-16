@@ -1,41 +1,66 @@
 # Dependencies
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Build output
+# Build outputs
 dist/
+build/
+*.tgz
 
 # Environment variables
 .env
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Testing
+# API Keys and secrets
+*.key
+secrets.json
+
+# Temporary files
+*.tmp
+*.temp
 .mutation-testing-temp/
-generated-tests/
-gambit_out/
+.coverage-analysis-temp/
 
-# Downloaded binaries
-.bin/
-.gambit-temp/
+# Logs
+logs/
+*.log
 
-# IDE
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+.nyc_output/
+
+# IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Coverage
-coverage/
-.nyc_output/ 
+# Test outputs
+gambit_out*/
 generated-tests/
+generated-coverage-tests/
+generated-mutation-tests/
+
+# TypeScript cache
+*.tsbuildinfo

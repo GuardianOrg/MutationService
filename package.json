@@ -1,41 +1,68 @@
 {
   "name": "forge-mutation-tester",
   "version": "1.0.0",
-  "description": "AI-powered mutation testing tool that generates Forge tests to cover gaps",
+  "description": "AI-powered mutation testing and coverage analysis tool for Solidity smart contracts using Gambit and OpenAI",
   "main": "dist/index.js",
   "bin": {
-    "forge-mutation-tester": "./dist/cli.js"
+    "forge-mutation-tester": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
     "postbuild": "chmod +x dist/cli.js",
-    "dev": "tsx src/cli.ts",
+    "dev": "ts-node src/cli.ts",
     "start": "node dist/cli.js",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
-    "mutation-testing",
     "solidity",
+    "smart-contracts",
+    "mutation-testing",
+    "testing",
+    "coverage",
     "forge",
+    "foundry",
+    "hardhat",
     "gambit",
     "ai",
-    "testing"
+    "openai",
+    "blockchain",
+    "ethereum",
+    "defi",
+    "security"
   ],
-  "author": "",
+  "author": "Your Name <your.email@domain.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/forge-mutation-tester.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/forge-mutation-tester/issues"
+  },
+  "homepage": "https://github.com/yourusername/forge-mutation-tester#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "USAGE.md",
+    "LICENSE"
+  ],
   "dependencies": {
-    "@types/glob": "^8.1.0",
-    "@types/node": "^22.10.5",
-    "@types/yargs": "^17.0.33",
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
-    "dotenv": "^16.4.7",
-    "glob": "^10.4.5",
-    "openai": "^4.77.3",
+    "dotenv": "^16.3.1",
+    "glob": "^10.3.10",
+    "openai": "^4.20.1",
     "ora": "^5.4.1",
-    "simple-git": "^3.27.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "yargs": "^17.7.2"
-  }
+    "simple-git": "^3.19.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2"
+  },
+  "preferGlobal": true
 }
