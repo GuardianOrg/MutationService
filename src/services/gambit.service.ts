@@ -383,10 +383,17 @@ export class GambitService {
             .filter(line => line.trim() && !line.startsWith('Warning:'))
             .map(line => line.trim());
           
-          // Use ALL remappings for proper import resolution
-          solcRemappings = allRemappings;
+          // Filter to only essential remappings that don't crash Gambit
+          solcRemappings = allRemappings.filter(mapping => {
+            return mapping.includes('@openzeppelin/contracts/=') || 
+                   mapping.includes('@openzeppelin/contracts-upgradeable/=') ||
+                   mapping.includes('v4-core/=') ||
+                   mapping.includes('v4-periphery/=') ||
+                   mapping.includes('@uniswap/v4-core/=') ||
+                   mapping.includes('forge-std/=');
+          });
           
-          console.log(chalk.dim(`  Found and will use all ${solcRemappings.length} remappings from forge config`));
+          console.log(chalk.dim(`  Using ${solcRemappings.length} essential remappings (${allRemappings.length} total available)`));
         }
 
       } catch (e) {
@@ -567,6 +574,7 @@ export class GambitService {
           // Filter to only essential remappings that don't crash Gambit
           solcRemappings = allRemappings.filter(mapping => {
             return mapping.includes('@openzeppelin/contracts/=') || 
+                   mapping.includes('@openzeppelin/contracts-upgradeable/=') ||
                    mapping.includes('v4-core/=') ||
                    mapping.includes('v4-periphery/=') ||
                    mapping.includes('@uniswap/v4-core/=') ||

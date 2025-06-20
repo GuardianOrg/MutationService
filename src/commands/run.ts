@@ -267,6 +267,7 @@ async function saveSummary(summary: string, outputDir: string): Promise<void> {
 }
 
 async function saveMutationAnalysis(reportMarkdown: string, outputDir: string): Promise<void> {
+  await fs.mkdir(outputDir, { recursive: true });
   const analysisPath = path.join(outputDir, 'guardian-mutation-analysis.md');
   await fs.writeFile(analysisPath, reportMarkdown);
   console.log(chalk.green(`  ✓ Saved mutation analysis report`));
