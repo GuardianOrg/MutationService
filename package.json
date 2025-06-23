@@ -1,6 +1,6 @@
 {
   "name": "forge-mutation-tester",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "AI-powered mutation testing and coverage analysis tool for Solidity smart contracts using Gambit and OpenAI",
   "main": "dist/index.js",
   "bin": {
