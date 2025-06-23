@@ -390,7 +390,8 @@ export class GambitService {
                    mapping.includes('v4-core/=') ||
                    mapping.includes('v4-periphery/=') ||
                    mapping.includes('@uniswap/v4-core/=') ||
-                   mapping.includes('forge-std/=');
+                   mapping.includes('forge-std/=') ||
+                   mapping.includes('solady/=');
           });
           
           console.log(chalk.dim(`  Using ${solcRemappings.length} essential remappings (${allRemappings.length} total available)`));
@@ -405,9 +406,11 @@ export class GambitService {
           "v4-core/=lib/v4-core/src/", 
           "forge-std/=lib/forge-std/src/",
           "ds-test/=lib/ds-test/src/",
+          "solady/=lib/solady/src/",
         ] : [
           "@openzeppelin/=node_modules/@openzeppelin/",
           "@uniswap/=node_modules/@uniswap/",
+          "solady/=node_modules/solady/",
         ];
       }
       
@@ -578,7 +581,8 @@ export class GambitService {
                    mapping.includes('v4-core/=') ||
                    mapping.includes('v4-periphery/=') ||
                    mapping.includes('@uniswap/v4-core/=') ||
-                   mapping.includes('forge-std/=');
+                   mapping.includes('forge-std/=') ||
+                   mapping.includes('solady/=');
           });
           
           console.log(chalk.dim(`  Using ${solcRemappings.length} essential remappings (${allRemappings.length} total available)`));
@@ -674,15 +678,73 @@ export class GambitService {
             }
           );
           
+          // Debug: Show what Gambit actually output
+          if (gambitOutput && gambitOutput.trim()) {
+            console.log(chalk.dim(`  Gambit stdout: ${gambitOutput.trim().substring(0, 200)}...`));
+          }
+          if (gambitError && gambitError.trim()) {
+            console.log(chalk.yellow(`  Gambit stderr: ${gambitError.trim().substring(0, 200)}...`));
+          }
+          
           console.log(chalk.green(`  ✅ Gambit completed for ${sourceFile}`));
           
           // Parse mutants from this file's output directory
           let fileMutants: any[] = [];
           try {
             fileMutants = await this.parseGambitMutants(projectPath, config.outdir, sourceFile);
+            console.log(chalk.dim(`  Found ${fileMutants.length} mutants for ${sourceFile}`));
             allMutants.push(...fileMutants);
           } catch (parseError) {
             console.log(chalk.yellow(`  Warning: Could not parse mutants for ${sourceFile}: ${parseError}`));
+          }
+          
+          // If no mutants were generated, try with simplified config
+          if (fileMutants.length === 0) {
+            console.log(chalk.yellow(`  No mutants generated, trying simplified approach for ${sourceFile}...`));
+            
+            const simpleConfig = {
+              filename: sourceFile,
+              sourceroot: ".",
+              skip_validate: true,
+              mutations: ["binary-op-mutation", "require-mutation"], // Just 2 simple mutation types
+              outdir: `gambit_out_simple_${path.basename(sourceFile, '.sol')}`,
+              solc: "solc",
+              num_mutants: 10,
+              // No remappings - let it fail gracefully if imports don't work
+            };
+            
+            const simpleConfigPath = path.join(projectPath, `gambit-simple-${i}.json`);
+            await fs.writeFile(simpleConfigPath, JSON.stringify(simpleConfig, null, 2));
+            
+            try {
+              console.log(chalk.dim(`  Running simplified: gambit mutate --json ${path.basename(simpleConfigPath)}`));
+              
+              const { stdout: simpleOutput, stderr: simpleError } = await execAsync(
+                `${this.gambitPath} mutate --json ${path.basename(simpleConfigPath)}`,
+                { 
+                  cwd: projectPath,
+                  maxBuffer: 1024 * 1024 * 10,
+                  env: { ...process.env, PATH: envPath },
+                  timeout: 120000 // 2 minute timeout for simple version
+                }
+              );
+              
+              if (simpleOutput && simpleOutput.trim()) {
+                console.log(chalk.dim(`  Simple Gambit stdout: ${simpleOutput.trim().substring(0, 200)}...`));
+              }
+              if (simpleError && simpleError.trim()) {
+                console.log(chalk.yellow(`  Simple Gambit stderr: ${simpleError.trim().substring(0, 200)}...`));
+              }
+              
+              const simpleMutants = await this.parseGambitMutants(projectPath, simpleConfig.outdir, sourceFile);
+              console.log(chalk.dim(`  Found ${simpleMutants.length} mutants with simple config for ${sourceFile}`));
+              allMutants.push(...simpleMutants);
+              
+              await fs.unlink(simpleConfigPath);
+            } catch (simpleError: any) {
+              console.log(chalk.red(`  Even simplified config failed for ${sourceFile}: ${simpleError.message}`));
+              await fs.unlink(simpleConfigPath).catch(() => {});
+            }
           }
           
           // Clean up config file
@@ -694,7 +756,19 @@ export class GambitService {
       }
       
       if (allMutants.length === 0) {
-        throw new Error('No mutants were generated successfully');
+        console.log(chalk.red('\n🚨 No mutants were generated from any source files!'));
+        console.log(chalk.yellow('\nPossible causes:'));
+        console.log(chalk.yellow('  • Solidity version 0.8.28 may not be fully supported by Gambit'));
+        console.log(chalk.yellow('  • Complex imports/dependencies preventing Gambit from parsing files'));
+        console.log(chalk.yellow('  • Files may be interfaces/abstract contracts with no implementation'));
+        console.log(chalk.yellow('  • Solc compilation issues preventing mutation generation'));
+        console.log(chalk.cyan('\nTroubleshooting suggestions:'));
+        console.log(chalk.cyan('  • Try with a project using Solidity 0.8.19 or earlier'));
+        console.log(chalk.cyan('  • Ensure all imports resolve correctly with forge/hardhat'));
+        console.log(chalk.cyan('  • Check that solc can compile individual files'));
+        console.log(chalk.cyan('  • Focus on files with actual logic (not just interfaces)'));
+        
+        throw new Error(`No mutants were generated from ${sourceFiles.length} source files. See troubleshooting suggestions above.`);
       }
       
       console.log(chalk.blue(`\n🧬 Generated ${allMutants.length} mutants across ${sourceFiles.length} files`));
@@ -856,11 +930,33 @@ export class GambitService {
     try {
       // Read mutants.log for mutant information
       const mutantsLogPath = path.join(gambitOutputDir, 'mutants.log');
+      
+      // Check if file exists and has content
+      try {
+        const stats = await fs.stat(mutantsLogPath);
+        if (stats.size === 0) {
+          console.log(chalk.yellow(`  Warning: mutants.log is empty for ${sourceFile}`));
+          return [];
+        }
+      } catch (statError) {
+        console.log(chalk.yellow(`  Warning: mutants.log not found for ${sourceFile}`));
+        return [];
+      }
+      
       const mutantsLog = await fs.readFile(mutantsLogPath, 'utf-8');
+      
+      if (!mutantsLog.trim()) {
+        console.log(chalk.yellow(`  Warning: mutants.log is empty for ${sourceFile}`));
+        return [];
+      }
+      
       const logLines = mutantsLog.trim().split('\n');
+      console.log(chalk.dim(`  Parsing ${logLines.length} lines from mutants.log`));
 
       // Parse each line of mutants.log
       for (const line of logLines) {
+        if (!line.trim()) continue; // Skip empty lines
+        
         const parts = line.split(',');
         if (parts.length >= 6) {
           const [id, mutationType, file, location, original, mutated] = parts;
@@ -877,10 +973,12 @@ export class GambitService {
             sourceFile: sourceFile,
             outputDir: outputDir
           });
+        } else {
+          console.log(chalk.yellow(`  Warning: Invalid mutant log line (${parts.length} parts): ${line.substring(0, 100)}`));
         }
       }
     } catch (error) {
-      console.error(chalk.yellow('Failed to parse Gambit mutants, returning empty list'));
+      console.error(chalk.yellow(`  Failed to parse Gambit mutants for ${sourceFile}: ${error}`));
       return [];
     }
 
