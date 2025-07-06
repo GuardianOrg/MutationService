@@ -20,6 +20,8 @@ Analyzes test coverage gaps and generates AI-powered tests to increase coverage 
 - ⚡ **Real Test Execution**: Actually runs tests against each mutant to determine kill vs survival
 - 🧠 **Intelligent Analysis**: Comprehensive breakdown by file, mutation type, and severity
 - 📋 **Actionable Insights**: Specific recommendations prioritized by security and business impact
+- 🔄 **Iterative Testing**: Re-run mutation tests after adding generated tests to progressively improve your test suite
+- 📁 **Local Directory Support**: Run mutation testing on already cloned and set up projects
 
 ### 📊 Coverage Analysis Features  
 - 📈 **Smart Coverage Analysis**: Uses `forge coverage` or `hardhat coverage` with LCOV parsing
@@ -149,6 +151,28 @@ npm link
 forge-mutation-tester run -r https://github.com/user/repo
 ```
 
+#### Local Directory Mode (NEW)
+```bash
+# Run on an already cloned and set up project
+forge-mutation-tester run -l /path/to/your/project
+
+# Run from current directory
+forge-mutation-tester run -l .
+```
+
+#### Iterative Testing Mode (NEW)
+```bash
+# Enable iterative mode to progressively improve test suite
+forge-mutation-tester run -l . --iterative
+
+# The tool will:
+# 1. Run mutation testing
+# 2. Generate tests for survived mutations
+# 3. Wait for you to add tests to your suite
+# 4. Re-run mutation testing to check improvement
+# 5. Repeat until all mutations are killed or you stop
+```
+
 #### With Private Repository
 ```bash
 forge-mutation-tester run -r https://github.com/user/private-repo -t YOUR_GITHUB_PAT
@@ -163,7 +187,8 @@ forge-mutation-tester run \
   -o ./generated-mutation-tests \
   --openai-key YOUR_OPENAI_KEY \
   --model gpt-4-turbo-preview \
-  --no-cleanup
+  --no-cleanup \
+  --iterative
 ```
 
 ### Coverage Analysis Command
@@ -195,15 +220,27 @@ forge-mutation-tester coverage \
 
 ### Mutation Testing (`run` command)
 
+#### Remote Repository Mode
 1. **Repository Cloning**: Your repo is cloned automatically
 2. **Setup Instructions**: The tool detects your project type and shows you exactly what commands to run
-3. **Manual Setup**: You run the setup commands in your terminal:
-   - **For Forge projects**: `forge install`, `forge build`, `forge test`
-   - **For Hardhat projects**: `npm install`, `npx hardhat compile`, `npx hardhat test`
-   - **Solc Installation**: Install exact matching Solidity compiler version
+3. **Manual Setup**: You run the setup commands in your terminal
 4. **Confirmation**: Type "yes" when your project is ready
 5. **Automatic Mutation Testing**: Gambit runs mutation testing on source files only
 6. **AI Analysis**: Analyzes survived mutations and generates targeted tests
+
+#### Local Directory Mode (NEW)
+1. **Project Detection**: The tool uses your specified local directory
+2. **Setup Check**: Automatically detects if project is already set up
+3. **Mutation Testing**: Runs immediately if project is ready, or shows setup instructions if needed
+4. **AI Analysis**: Same as remote mode
+
+#### Iterative Mode (NEW)
+1. **Initial Run**: Performs standard mutation testing
+2. **Test Generation**: Creates tests for survived mutations
+3. **User Integration**: You add generated tests to your test suite
+4. **Re-run**: Press Enter to run mutation testing again
+5. **Progress Tracking**: Shows improvement between iterations
+6. **Completion**: Continues until all mutations are killed or you stop
 
 ### Coverage Analysis (`coverage` command)
 
@@ -219,7 +256,8 @@ forge-mutation-tester coverage \
 ## Options
 
 ### Shared Options (Both Commands)
-- `-r, --repo <url>` - Git repository URL (required)
+- `-r, --repo <url>` - Git repository URL (use this OR -l/--local)
+- `-l, --local <path>` - Path to local repository (use this OR -r/--repo) **(NEW)**
 - `-t, --token <token>` - Personal Access Token for private repositories
 - `-b, --branch <branch>` - Branch to test (default: "main")
 - `-o, --output <dir>` - Output directory for generated tests
@@ -228,6 +266,7 @@ forge-mutation-tester coverage \
 - `--no-cleanup` - Keep cloned repository after testing
 
 ### Mutation Testing (`run`) Specific
+- `-i, --iterative` - Enable iterative mode for progressive improvement **(NEW)**
 - Default output directory: `./generated-tests`
 
 ### Coverage Analysis (`coverage`) Specific  
@@ -252,6 +291,57 @@ export OPENAI_MODEL=gpt-4-turbo-preview
 **⚠️ Important**: Keep your API keys secure! Never commit them to version control.
 
 ## Example Sessions
+
+### Local Directory Mutation Testing (NEW)
+
+```bash
+$ forge-mutation-tester run -l /Users/me/my-project
+
+🧬 Forge Testing Suite - Mutation Testing
+
+Step 1: Using local repository...
+✓ Using local repository at: /Users/me/my-project
+
+✅ Step 2: Project already set up
+
+Step 3: Setting up and running mutation tests...
+[... mutation testing proceeds ...]
+```
+
+### Iterative Mutation Testing (NEW)
+
+```bash
+$ forge-mutation-tester run -l . --iterative
+
+🧬 Forge Testing Suite - Mutation Testing
+
+🔄 Iterative Mutation Testing Mode Enabled
+
+━━━ Iteration 1 ━━━
+
+Running mutation tests (iteration 1)...
+[... shows 25 mutations, 17 killed, 8 survived ...]
+
+Generating tests for 8 remaining mutations...
+📁 Generated tests saved to: ./generated-tests/iteration-1
+
+📝 Next steps:
+1. Review the generated tests in the output directory
+2. Add the relevant tests to your test suite
+3. Run your test suite to ensure all tests pass
+4. Press Enter to continue with the next iteration
+
+❓ Have you added the generated tests to your test suite?
+Press Enter to continue with next iteration, or type "stop" to finish: [Enter]
+
+━━━ Iteration 2 ━━━
+
+Running mutation tests (iteration 2)...
+✅ Progress! Killed 5 more mutations since last iteration.
+[... shows 25 mutations, 22 killed, 3 survived ...]
+
+[... continues until all mutations are killed or user stops ...]
+```
 
 ### Mutation Testing Example
 
@@ -494,11 +584,13 @@ The coverage analysis command identifies and targets:
 5. **Source Files Only**: The tool only mutates source contracts, never test files
 6. **Exact Solc Version**: Install the exact Solidity compiler version your project uses
 7. **Quality Over Coverage**: Focus on test quality improvements rather than just coverage percentage
+8. **Use Iterative Mode**: For complex projects, use `--iterative` to progressively improve test quality **(NEW)**
+9. **Local Development**: Use `-l .` to run mutation testing on your current project without cloning **(NEW)**
 
 ### Coverage Analysis Specific  
-8. **Set Realistic Targets**: Start with achievable coverage targets (80-90%) rather than 100%
-9. **Prioritize Critical Code**: Focus first on coverage of critical business logic and security functions
-10. **Combine with Mutation Testing**: Use both commands together for comprehensive test suite analysis
+10. **Set Realistic Targets**: Start with achievable coverage targets (80-90%) rather than 100%
+11. **Prioritize Critical Code**: Focus first on coverage of critical business logic and security functions
+12. **Combine with Mutation Testing**: Use both commands together for comprehensive test suite analysis
 
 ## Troubleshooting
 

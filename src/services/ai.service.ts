@@ -69,17 +69,32 @@ export class AIService {
       for (const [file, fileGaps] of mutationsByFile) {
         spinner.text = `Generating tests for ${file}...`;
         
-        const prompt = this.buildTestGenerationPrompt(fileGaps, file);
+        // Read the actual source file to understand the contract
+        const filePath = path.join(projectPath, file);
+        const sourceCode = await fs.readFile(filePath, 'utf-8');
+        
+        // Try to find existing test files for this contract to understand patterns
+        const contractName = path.basename(file, '.sol');
+        const existingTestExample = await this.findExistingTestExample(projectPath, contractName);
+        
+        const prompt = this.buildTestGenerationPrompt(fileGaps, file, sourceCode, existingTestExample);
         
         const response = await this.openai.chat.completions.create({
           model: this.model,
           messages: [
             {
               role: 'system',
-              content: `You are an expert Solidity developer specializing in writing comprehensive Forge tests. 
-Your task is to generate test cases that will catch the survived mutations from mutation testing.
-Each test should be well-documented with comments explaining what mutation it targets.
-Use Forge test conventions and best practices.`
+              content: `You are an expert Solidity developer specializing in writing Forge tests.
+CRITICAL REQUIREMENTS:
+1. Generate ONLY valid Solidity code - no markdown, no triple backticks, no explanations
+2. The code must compile and run with 'forge test' without any modifications
+3. Import the contract being tested correctly
+4. Use proper Forge test patterns (setUp, test functions, assertions)
+5. Handle contract deployment and initialization properly
+6. Use only public/external functions - never call internal functions
+7. Include all necessary imports at the top
+8. Start with pragma solidity statement
+9. The output should be a complete, compilable .sol file`
             },
             {
               role: 'user',
@@ -90,9 +105,16 @@ Use Forge test conventions and best practices.`
           max_tokens: 4000
         });
 
-        const generatedContent = response.choices[0].message.content || '';
+        let generatedContent = response.choices[0].message.content || '';
         
-        // Parse the generated test
+        // Clean up any markdown formatting if the AI added it despite instructions
+        generatedContent = this.cleanGeneratedCode(generatedContent);
+        
+        // Validate that it looks like valid Solidity
+        if (!this.isValidSolidity(generatedContent)) {
+          console.warn(chalk.yellow(`Generated test for ${file} may have issues - please review`));
+        }
+        
         const testFileName = this.generateTestFileName(file);
         generatedTests.push({
           fileName: testFileName,
@@ -110,28 +132,109 @@ Use Forge test conventions and best practices.`
     }
   }
 
-  private buildTestGenerationPrompt(gaps: TestGap[], fileName: string): string {
-    let prompt = `Generate Forge tests for the following survived mutations in ${fileName}:\n\n`;
+  private async findExistingTestExample(projectPath: string, contractName: string): Promise<string | null> {
+    // Look for existing test files to understand the project's test patterns
+    const possibleTestPaths = [
+      `test/${contractName}.t.sol`,
+      `test/${contractName}Test.sol`,
+      `test/${contractName}.test.sol`,
+      `tests/${contractName}.t.sol`,
+      `test/unit/${contractName}.t.sol`,
+    ];
+    
+    for (const testPath of possibleTestPaths) {
+      try {
+        const fullPath = path.join(projectPath, testPath);
+        const content = await fs.readFile(fullPath, 'utf-8');
+        // Return first 50 lines as example
+        return content.split('\n').slice(0, 50).join('\n');
+      } catch {
+        // File doesn't exist, try next
+      }
+    }
+    
+    // Try to find any test file as example
+    try {
+      const testFiles = await fs.readdir(path.join(projectPath, 'test'));
+      const solidityTest = testFiles.find(f => f.endsWith('.t.sol') || f.endsWith('.test.sol'));
+      if (solidityTest) {
+        const content = await fs.readFile(path.join(projectPath, 'test', solidityTest), 'utf-8');
+        return content.split('\n').slice(0, 50).join('\n');
+      }
+    } catch {
+      // No test directory or can't read
+    }
+    
+    return null;
+  }
+
+  private cleanGeneratedCode(code: string): string {
+    // Remove markdown code blocks if present
+    code = code.replace(/```solidity\s*\n?/g, '');
+    code = code.replace(/```\s*$/g, '');
+    code = code.trim();
+    
+    // Remove any explanatory text before pragma
+    const pragmaIndex = code.indexOf('pragma solidity');
+    if (pragmaIndex > 0) {
+      code = code.substring(pragmaIndex);
+    }
+    
+    return code;
+  }
+
+  private isValidSolidity(code: string): boolean {
+    // Basic validation that this looks like Solidity code
+    return code.includes('pragma solidity') && 
+           code.includes('contract') && 
+           (code.includes('function test') || code.includes('function testFuzz'));
+  }
+
+  private buildTestGenerationPrompt(
+    gaps: TestGap[], 
+    fileName: string,
+    sourceCode: string,
+    existingTestExample: string | null
+  ): string {
+    // Extract contract name and understand structure
+    const contractMatch = sourceCode.match(/contract\s+(\w+)/);
+    const contractName = contractMatch ? contractMatch[1] : path.basename(fileName, '.sol');
+    
+    // Extract imports from source
+    const imports = sourceCode.match(/import\s+.*?;/g) || [];
+    
+    let prompt = `Generate a complete, compilable Forge test contract for ${contractName}.\n\n`;
+    
+    prompt += `Source contract to test:\n${sourceCode.substring(0, 3000)}\n\n`;
+    
+    if (existingTestExample) {
+      prompt += `Example of existing test pattern in this project:\n${existingTestExample}\n\n`;
+    }
+    
+    prompt += `The test must catch these survived mutations:\n\n`;
 
     gaps.forEach((gap, index) => {
-      const { mutationResult, context } = gap;
+      const { mutationResult } = gap;
       prompt += `Mutation ${index + 1}:\n`;
       prompt += `Type: ${mutationResult.mutationType}\n`;
       prompt += `Line: ${mutationResult.line}\n`;
       prompt += `Original: ${mutationResult.original}\n`;
-      prompt += `Mutated: ${mutationResult.mutated}\n`;
-      prompt += `Context:\n\`\`\`solidity\n${context}\n\`\`\`\n\n`;
+      prompt += `Mutated: ${mutationResult.mutated}\n\n`;
     });
 
-    prompt += `\nGenerate comprehensive Forge tests that will catch these mutations. 
-Each test should:
-1. Have a descriptive name indicating what it tests
-2. Include a comment explaining which mutation it targets
-3. Use appropriate assertions to ensure the mutation would be caught
-4. Follow Forge testing best practices
-5. Be ready to run without modification
+    prompt += `\nREQUIREMENTS:
+1. Generate ONLY the Solidity code - no markdown, no explanations
+2. Include all necessary imports (the contract being tested, Test.sol, console.sol, etc)
+3. Use the same import paths as the source contract
+4. Create a test contract that extends Test
+5. Include setUp() function to deploy and initialize contracts
+6. Write specific test functions that would fail if the mutations were present
+7. Use descriptive test function names (e.g., test_RevertWhen_SlippageTooHigh)
+8. Only call public/external functions - never internal ones
+9. Use proper assertions (assertEq, assertTrue, vm.expectRevert, etc.)
+10. The test must compile and run with 'forge test' without modifications
 
-Return only the Solidity test contract code, starting with the pragma statement.`;
+Generate the complete test contract now:`;
 
     return prompt;
   }
@@ -262,15 +365,17 @@ Format the response in markdown.`;
             {
               role: 'system',
               content: `You are an expert Solidity developer specializing in writing comprehensive test coverage.
-Your task is to generate Forge tests that specifically target uncovered code paths.
-Focus on:
-1. Executing uncovered lines of code
-2. Calling uncovered functions with various parameters
-3. Testing both true and false branches of conditionals
-4. Edge cases and boundary conditions
-5. Error conditions that may be uncovered
-
-Write tests that are realistic and follow Solidity best practices.`
+CRITICAL REQUIREMENTS:
+1. Generate ONLY valid Solidity code - no markdown, no triple backticks, no explanations
+2. The code must compile and run with 'forge test' without any modifications
+3. Import the contract being tested correctly using relative paths
+4. Use proper Forge test patterns (setUp, test functions, assertions)
+5. Handle contract deployment and initialization properly
+6. Use only public/external functions - never call internal functions
+7. Include all necessary imports at the top (Test.sol, console.sol, etc.)
+8. Start with pragma solidity statement
+9. The output should be a complete, compilable .sol file
+10. Focus on executing the specific uncovered code paths`
             },
             {
               role: 'user',
@@ -281,7 +386,15 @@ Write tests that are realistic and follow Solidity best practices.`
           max_tokens: 3000
         });
 
-        const generatedContent = response.choices[0].message.content || '';
+        let generatedContent = response.choices[0].message.content || '';
+        
+        // Clean up any markdown formatting
+        generatedContent = this.cleanGeneratedCode(generatedContent);
+        
+        // Validate
+        if (!this.isValidSolidity(generatedContent)) {
+          console.warn(chalk.yellow(`Generated coverage test for ${file} may have issues - please review`));
+        }
         
         const testFileName = this.generateCoverageTestFileName(file);
         generatedTests.push({

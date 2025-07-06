@@ -19,15 +19,29 @@ program
 program
   .command('run')
   .description('Run mutation testing on a repository and generate Forge tests')
-  .requiredOption('-r, --repo <url>', 'Git repository URL')
+  .option('-r, --repo <url>', 'Git repository URL (use this OR --local)')
+  .option('-l, --local <path>', 'Path to local repository (use this OR --repo)')
   .option('-t, --token <token>', 'Personal Access Token for private repositories')
   .option('-b, --branch <branch>', 'Branch to test', 'main')
   .option('-o, --output <dir>', 'Output directory for generated tests', './generated-tests')
   .option('--openai-key <key>', 'OpenAI API key (or set OPENAI_API_KEY env var)')
   .option('--model <model>', 'OpenAI model to use', 'gpt-4-turbo-preview')
   .option('--no-cleanup', 'Keep cloned repository after testing')
+  .option('-i, --iterative', 'Enable iterative mode - re-run after adding tests')
+  .option('-w, --watch', 'Watch for test changes and re-run automatically')
   .action(async (options) => {
     try {
+      // Validate that either repo or local is provided
+      if (!options.repo && !options.local) {
+        console.error(chalk.red('Error: Either --repo or --local must be provided'));
+        process.exit(1);
+      }
+      
+      if (options.repo && options.local) {
+        console.error(chalk.red('Error: Cannot use both --repo and --local. Choose one.'));
+        process.exit(1);
+      }
+
       // Validate OpenAI API key
       const apiKey = options.openaiKey || process.env.OPENAI_API_KEY;
       if (!apiKey) {
@@ -37,6 +51,7 @@ program
 
       await runMutationTest({
         ...options,
+        localPath: options.local,
         openaiKey: apiKey
       });
     } catch (error) {
@@ -48,7 +63,8 @@ program
 program
   .command('coverage')
   .description('Analyze test coverage and generate tests to increase coverage')
-  .requiredOption('-r, --repo <url>', 'Git repository URL')
+  .option('-r, --repo <url>', 'Git repository URL (use this OR --local)')
+  .option('-l, --local <path>', 'Path to local repository (use this OR --repo)')
   .option('-t, --token <token>', 'Personal Access Token for private repositories')
   .option('-b, --branch <branch>', 'Branch to test', 'main')
   .option('-o, --output <dir>', 'Output directory for generated tests', './generated-coverage-tests')
@@ -58,6 +74,17 @@ program
   .option('--no-cleanup', 'Keep cloned repository after testing')
   .action(async (options) => {
     try {
+      // Validate that either repo or local is provided
+      if (!options.repo && !options.local) {
+        console.error(chalk.red('Error: Either --repo or --local must be provided'));
+        process.exit(1);
+      }
+      
+      if (options.repo && options.local) {
+        console.error(chalk.red('Error: Cannot use both --repo and --local. Choose one.'));
+        process.exit(1);
+      }
+
       // Validate OpenAI API key
       const apiKey = options.openaiKey || process.env.OPENAI_API_KEY;
       if (!apiKey) {
@@ -67,6 +94,7 @@ program
 
       await runCoverageAnalysis({
         ...options,
+        localPath: options.local,
         openaiKey: apiKey,
         targetCoverage: parseInt(options.targetCoverage)
       });

@@ -1,11 +1,14 @@
 export interface RunOptions {
-  repo: string;
+  repo?: string;
+  localPath?: string;
   token?: string;
   branch: string;
   output: string;
   openaiKey: string;
   model: string;
   cleanup: boolean;
+  iterative?: boolean;
+  watch?: boolean;
 }
 
 export interface MutationResult {

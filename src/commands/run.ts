@@ -1,11 +1,12 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import chalk from 'chalk';
-import { RunOptions, MutationSummary } from '../types';
+import { RunOptions, MutationSummary, MutationResult } from '../types';
 import { GitService } from '../services/git.service';
 import { GambitService } from '../services/gambit.service';
 import { AIService } from '../services/ai.service';
 import * as readline from 'readline';
+import { watch } from 'fs';
 
 // Helper functions for mutation analysis display
 function getScoreEmoji(score: number): string {
@@ -27,141 +28,374 @@ function getScoreGrade(score: number): string {
 }
 
 export async function runMutationTest(options: RunOptions): Promise<void> {
-  console.log(chalk.bold.blue('\n🧬 Forge Mutation Tester\n'));
+  console.log(chalk.bold.blue('\n🧬 Forge Testing Suite - Mutation Testing\n'));
   
   const gitService = new GitService();
   const gambitService = new GambitService();
   const aiService = new AIService(options.openaiKey, options.model);
   
   let repoPath: string | null = null;
+  let isLocalMode = false;
 
   try {
-    // Step 1: Clone the repository
-    console.log(chalk.bold('Step 1: Cloning repository...'));
-    const tempDir = path.join(process.cwd(), '.mutation-testing-temp');
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    repoPath = await gitService.cloneRepository(
-      options.repo,
-      tempDir,
-      options.branch,
-      options.token
-    );
-
-    // Step 2: Give setup instructions and wait for user confirmation
-    console.log(chalk.bold('\n📋 Step 2: Project Setup Required'));
-    await displaySetupInstructions(repoPath);
-    
-    const isReady = await waitForUserConfirmation();
-    if (!isReady) {
-      console.log(chalk.yellow('\n⏸️  Setup cancelled. Please run the command again when your project is ready.'));
-      return;
-    }
-
-    // Step 3: Setup and run mutation testing
-    console.log(chalk.bold('\nStep 3: Setting up and running mutation tests...'));
-    await gambitService.setupGambitConfigWithoutDependencies(repoPath);
-    const mutationResults = await gambitService.runMutationTestingWithoutSetup(repoPath);
-    
-    // Step 4: Analyze mutation testing results
-    console.log(chalk.bold('\nStep 4: Analyzing mutation testing results...'));
-    
-    const mutationAnalysisResult = await gambitService.generateMutationAnalysis(mutationResults, repoPath);
-    const { guardianScore, analysis, reportMarkdown } = mutationAnalysisResult;
-    
-    // Display Guardian Mutation Score and key insights
-    console.log(chalk.bold.blue('\n🛡️ Guardian Mutation Analysis'));
-    console.log(chalk.cyan(`Guardian Mutation Score: ${guardianScore}/100 ${getScoreEmoji(guardianScore)}`));
-    console.log(chalk.dim(`${getScoreGrade(guardianScore)}`));
-    
-    console.log(chalk.cyan('\n📊 Quick Stats:'));
-    console.log(`  • Total mutations tested: ${analysis.summary.totalMutants}`);
-    console.log(`  • Mutations killed: ${analysis.summary.killedMutants} (${analysis.summary.basicMutationScore.toFixed(1)}%)`);
-    console.log(`  • Mutations survived: ${analysis.summary.survivedMutants}`);
-    if (analysis.summary.errorMutants > 0) {
-      console.log(`  • Test errors: ${analysis.summary.errorMutants}`);
-    }
-    
-    // Show top recommendations immediately
-    if (analysis.recommendations.length > 0) {
-      console.log(chalk.yellow('\n🎯 Top Recommendations:'));
-      analysis.recommendations.slice(0, 3).forEach((rec: string, index: number) => {
-        console.log(chalk.yellow(`  ${index + 1}. ${rec}`));
-      });
-    }
-    
-    // Show critical gaps if any
-    if (analysis.criticalGaps.length > 0) {
-      console.log(chalk.red('\n🚨 Critical Gaps (Immediate Attention Required):'));
-      analysis.criticalGaps.slice(0, 3).forEach((gap: any, index: number) => {
-        console.log(chalk.red(`  ${index + 1}. ${gap.file}:${gap.line} - ${gap.mutationType}`));
-        console.log(chalk.red(`     "${gap.original}" → "${gap.mutated}" (Priority: ${gap.priority})`));
-      });
-    }
-
-    if (analysis.summary.survivedMutants === 0) {
-      console.log(chalk.green('\n✅ Excellent! All mutations were killed. Your test suite is comprehensive!'));
-      console.log(chalk.green('No gaps detected in your testing coverage.'));
+    // Step 1: Clone repository OR use local path
+    if (options.localPath) {
+      console.log(chalk.bold('Step 1: Using local repository...'));
+      repoPath = path.resolve(options.localPath);
+      isLocalMode = true;
       
-      // Save the analysis report even for perfect scores
-      await saveMutationAnalysis(reportMarkdown, options.output);
-      console.log(chalk.bold.green('\n✅ Mutation testing completed successfully!\n'));
-      console.log(chalk.cyan('Results:'));
-      console.log(`  • Guardian Mutation Score: ${guardianScore}/100`);
-      console.log(`  • Total mutations: ${mutationResults.length}`);
-      console.log(`  • All mutations killed: 100%`);
-      console.log(`\nDetailed analysis saved to: ${chalk.underline(path.join(options.output, 'guardian-mutation-analysis.md'))}`);
-      return;
+      // Verify the path exists
+      try {
+        await fs.access(repoPath);
+        console.log(chalk.green(`✓ Using local repository at: ${repoPath}`));
+      } catch {
+        throw new Error(`Local repository path does not exist: ${repoPath}`);
+      }
+    } else if (options.repo) {
+      console.log(chalk.bold('Step 1: Cloning repository...'));
+      const tempDir = path.join(process.cwd(), '.mutation-testing-temp');
+      await fs.mkdir(tempDir, { recursive: true });
+      
+      repoPath = await gitService.cloneRepository(
+        options.repo,
+        tempDir,
+        options.branch,
+        options.token
+      );
+    } else {
+      throw new Error('Either repo URL or local path must be provided');
     }
 
-    const survivedMutationResults = mutationResults.filter(r => r.status === 'survived');
-    console.log(chalk.yellow(`\n⚠️  Found ${analysis.summary.survivedMutants} survived mutations indicating gaps in test coverage`));
+    // Step 2: Check if already set up or needs setup
+    const needsSetup = !isLocalMode || !(await isProjectSetup(repoPath));
+    
+    if (needsSetup) {
+      console.log(chalk.bold('\n📋 Step 2: Project Setup Required'));
+      await displaySetupInstructions(repoPath);
+      
+      const isReady = await waitForUserConfirmation();
+      if (!isReady) {
+        console.log(chalk.yellow('\n⏸️  Setup cancelled. Please run the command again when your project is ready.'));
+        return;
+      }
+    } else {
+      console.log(chalk.bold('\n✅ Step 2: Project already set up'));
+    }
 
-    // Step 5: Generate tests for gaps
-    console.log(chalk.bold('\nStep 5: Generating tests to cover gaps...'));
-    const gaps = await aiService.analyzeGaps(survivedMutationResults, repoPath);
-    const generatedTests = await aiService.generateTests(gaps, repoPath);
-
-    // Step 6: Save generated tests
-    console.log(chalk.bold('\nStep 6: Saving generated tests...'));
-    await saveGeneratedTests(generatedTests, options.output);
-
-    // Step 7: Save mutation analysis report
-    console.log(chalk.bold('\nStep 7: Saving mutation analysis report...'));
-    await saveMutationAnalysis(reportMarkdown, options.output);
-
-    // Step 8: Generate and save summary
-    console.log(chalk.bold('\nStep 8: Generating summary report...'));
-    const summary = await aiService.generateSummary(mutationResults, generatedTests);
-    await saveSummary(summary, options.output);
-
-    // Display results
-    console.log(chalk.bold.green('\n✅ Mutation testing completed successfully!\n'));
-    console.log(chalk.cyan('Results:'));
-    console.log(`  • Guardian Mutation Score: ${guardianScore}/100 ${getScoreEmoji(guardianScore)}`);
-    console.log(`  • Total mutations: ${mutationResults.length}`);
-    console.log(`  • Killed mutations: ${mutationResults.filter((r: any) => r.status === 'killed').length}`);
-    console.log(`  • Survived mutations: ${analysis.summary.survivedMutants}`);
-    console.log(`  • Basic mutation score: ${analysis.summary.basicMutationScore.toFixed(2)}%`);
-    console.log(`  • Generated test files: ${generatedTests.length}`);
-    console.log(`\nOutput saved to: ${chalk.underline(options.output)}`);
-    console.log(`Detailed analysis: ${chalk.underline(path.join(options.output, 'guardian-mutation-analysis.md'))}`);
-
-    // Show final recommendations
-    if (analysis.recommendations.length > 3) {
-      console.log(chalk.yellow(`\n💡 See the detailed analysis report for ${analysis.recommendations.length - 3} additional recommendations`));
+    // Enable iterative mode
+    if (options.iterative) {
+      await runIterativeMutationTesting(repoPath, options, gambitService, aiService);
+    } else {
+      await runSingleMutationTest(repoPath, options, gambitService, aiService);
     }
 
   } catch (error) {
     console.error(chalk.red('\n❌ Error:'), error);
     throw error;
   } finally {
-    // Cleanup
-    if (repoPath && options.cleanup) {
+    // Cleanup only if:
+    // 1. Not in local mode (never cleanup local directories)
+    // 2. Not in iterative mode (users need the repo between iterations)
+    // 3. Cleanup is enabled
+    if (repoPath && !isLocalMode && !options.iterative && options.cleanup) {
       console.log(chalk.dim('\nCleaning up...'));
       await gitService.cleanup(repoPath);
     }
   }
+}
+
+async function isProjectSetup(projectPath: string): Promise<boolean> {
+  // Check if project appears to be already set up
+  try {
+    // Check for common build artifacts
+    const foundryOut = path.join(projectPath, 'out');
+    const hardhatArtifacts = path.join(projectPath, 'artifacts');
+    const nodeModules = path.join(projectPath, 'node_modules');
+    
+    const foundryExists = await fs.access(foundryOut).then(() => true).catch(() => false);
+    const hardhatExists = await fs.access(hardhatArtifacts).then(() => true).catch(() => false);
+    const nodeModulesExists = await fs.access(nodeModules).then(() => true).catch(() => false);
+    
+    return foundryExists || (hardhatExists && nodeModulesExists);
+  } catch {
+    return false;
+  }
+}
+
+async function runSingleMutationTest(
+  repoPath: string,
+  options: RunOptions,
+  gambitService: GambitService,
+  aiService: AIService
+): Promise<void> {
+  // Step 3: Setup and run mutation testing
+  console.log(chalk.bold('\nStep 3: Setting up and running mutation tests...'));
+  await gambitService.setupGambitConfigWithoutDependencies(repoPath);
+  const mutationResults = await gambitService.runMutationTestingWithoutSetup(repoPath);
+  
+  // Step 4: Analyze mutation testing results
+  console.log(chalk.bold('\nStep 4: Analyzing mutation testing results...'));
+  
+  const mutationAnalysisResult = await gambitService.generateMutationAnalysis(mutationResults, repoPath);
+  const { guardianScore, analysis, reportMarkdown } = mutationAnalysisResult;
+  
+  // Display Guardian Mutation Score and key insights
+  displayMutationResults(guardianScore, analysis);
+
+  if (analysis.summary.survivedMutants === 0) {
+    console.log(chalk.green('\n✅ Excellent! All mutations were killed. Your test suite is comprehensive!'));
+    console.log(chalk.green('No gaps detected in your testing coverage.'));
+    
+    // Save the analysis report even for perfect scores
+    await saveMutationAnalysis(reportMarkdown, options.output);
+    console.log(chalk.bold.green('\n✅ Mutation testing completed successfully!\n'));
+    displayFinalResults(guardianScore, mutationResults, [], options.output);
+    return;
+  }
+
+  const survivedMutationResults = mutationResults.filter(r => r.status === 'survived');
+  console.log(chalk.yellow(`\n⚠️  Found ${analysis.summary.survivedMutants} survived mutations indicating gaps in test coverage`));
+
+  // Step 5: Generate tests for gaps
+  console.log(chalk.bold('\nStep 5: Generating tests to cover gaps...'));
+  const gaps = await aiService.analyzeGaps(survivedMutationResults, repoPath);
+  const generatedTests = await aiService.generateTests(gaps, repoPath);
+
+  // Step 6: Save generated tests
+  console.log(chalk.bold('\nStep 6: Saving generated tests...'));
+  await saveGeneratedTests(generatedTests, options.output);
+
+  // Step 7: Save mutation analysis report
+  console.log(chalk.bold('\nStep 7: Saving mutation analysis report...'));
+  await saveMutationAnalysis(reportMarkdown, options.output);
+
+  // Step 8: Generate and save summary
+  console.log(chalk.bold('\nStep 8: Generating summary report...'));
+  const summary = await aiService.generateSummary(mutationResults, generatedTests);
+  await saveSummary(summary, options.output);
+
+  // Display results
+  displayFinalResults(guardianScore, mutationResults, generatedTests, options.output);
+}
+
+async function runIterativeMutationTesting(
+  repoPath: string,
+  options: RunOptions,
+  gambitService: GambitService,
+  aiService: AIService
+): Promise<void> {
+  console.log(chalk.bold.cyan('\n🔄 Iterative Mutation Testing Mode Enabled\n'));
+  
+  let iteration = 1;
+  let previousSurvivedCount = Infinity;
+  let consecutiveNoImprovement = 0;
+  let allMutationResults: MutationResult[] = [];
+  let previousSurvivedMutations: MutationResult[] = [];
+  
+  while (true) {
+    console.log(chalk.bold.blue(`\n━━━ Iteration ${iteration} ━━━\n`));
+    
+    // Run mutation testing
+    console.log(chalk.bold(`Running mutation tests (iteration ${iteration})...`));
+    await gambitService.setupGambitConfigWithoutDependencies(repoPath);
+    
+    // For first iteration, run full test. For subsequent, we could optimize to only test survived
+    const mutationResults = iteration === 1 
+      ? await gambitService.runMutationTestingWithoutSetup(repoPath)
+      : await gambitService.retestSurvivedMutations(repoPath, allMutationResults);
+    
+    // Store results for next iteration
+    allMutationResults = mutationResults;
+    
+    // Analyze results
+    const mutationAnalysisResult = await gambitService.generateMutationAnalysis(mutationResults, repoPath);
+    const { guardianScore, analysis, reportMarkdown } = mutationAnalysisResult;
+    
+    // Display results
+    displayMutationResults(guardianScore, analysis);
+    
+    const survivedMutations = mutationResults.filter(r => r.status === 'survived');
+    const survivedCount = survivedMutations.length;
+    
+    // Check if we've reached perfection
+    if (survivedCount === 0) {
+      console.log(chalk.green('\n🎉 Perfect! All mutations have been killed!'));
+      console.log(chalk.green('Your test suite now provides comprehensive coverage.'));
+      
+      await saveMutationAnalysis(reportMarkdown, options.output);
+      displayFinalResults(guardianScore, mutationResults, [], options.output);
+      break;
+    }
+    
+    // Check for improvement and show which mutations were killed
+    if (iteration > 1) {
+      const newlyKilledMutations = previousSurvivedMutations.filter(prev => 
+        !survivedMutations.some(curr => 
+          curr.file === prev.file && 
+          curr.line === prev.line && 
+          curr.mutationType === prev.mutationType
+        )
+      );
+      
+      const improvement = previousSurvivedCount - survivedCount;
+      if (improvement > 0) {
+        console.log(chalk.green(`\n✅ Progress! Killed ${improvement} more mutations since last iteration.`));
+        
+        if (newlyKilledMutations.length > 0) {
+          console.log(chalk.green('\n🎯 Newly killed mutations:'));
+          newlyKilledMutations.forEach((m, idx) => {
+            console.log(chalk.green(`  ${idx + 1}. ${m.file}:${m.line} - ${m.mutationType}`));
+            console.log(chalk.green(`     "${m.original}" → "${m.mutated}"`));
+          });
+        }
+        
+        consecutiveNoImprovement = 0;
+      } else if (improvement === 0) {
+        consecutiveNoImprovement++;
+        console.log(chalk.yellow(`\n⚠️  No improvement in this iteration (${consecutiveNoImprovement} consecutive).`));
+        
+        if (consecutiveNoImprovement >= 3) {
+          console.log(chalk.yellow('\n⚠️  No improvement for 3 consecutive iterations.'));
+          const shouldContinue = await askToContinue('Do you want to continue iterating?');
+          if (!shouldContinue) {
+            break;
+          }
+          consecutiveNoImprovement = 0;
+        }
+      }
+    }
+    
+    previousSurvivedCount = survivedCount;
+    previousSurvivedMutations = [...survivedMutations];
+    
+    // Generate new tests for remaining gaps
+    console.log(chalk.bold(`\nGenerating tests for ${survivedCount} remaining mutations...`));
+    
+    const gaps = await aiService.analyzeGaps(survivedMutations, repoPath);
+    const generatedTests = await aiService.generateTests(gaps, repoPath);
+    
+    // Save generated tests with iteration suffix
+    const iterationOutput = path.join(options.output, `iteration-${iteration}`);
+    await saveGeneratedTests(generatedTests, iterationOutput);
+    
+    // Save reports for this iteration
+    await saveMutationAnalysis(reportMarkdown, iterationOutput);
+    const summary = await aiService.generateSummary(mutationResults, generatedTests);
+    await saveSummary(summary, iterationOutput);
+    
+    console.log(chalk.cyan(`\n📁 Generated tests saved to: ${iterationOutput}`));
+    
+    // Show remaining mutations summary
+    console.log(chalk.yellow('\n📋 Remaining mutations to kill:'));
+    const mutationsByFile = survivedMutations.reduce((acc: any, m) => {
+      if (!acc[m.file]) acc[m.file] = [];
+      acc[m.file].push(m);
+      return acc;
+    }, {});
+    
+    Object.entries(mutationsByFile).forEach(([file, mutations]: [string, any]) => {
+      console.log(chalk.yellow(`  ${file}: ${mutations.length} mutations`));
+    });
+    
+    console.log(chalk.yellow('\n📝 Next steps:'));
+    console.log(chalk.yellow('1. Review the generated tests in the output directory'));
+    console.log(chalk.yellow('2. Add the relevant tests to your test suite'));
+    console.log(chalk.yellow('3. Run your test suite to ensure all tests pass'));
+    console.log(chalk.yellow('4. Press Enter to continue with the next iteration'));
+    
+    // Wait for user to add tests and continue
+    const shouldContinue = await waitForIterationContinue();
+    if (!shouldContinue) {
+      console.log(chalk.yellow('\n⏸️  Iterative testing stopped by user.'));
+      break;
+    }
+    
+    iteration++;
+  }
+  
+  console.log(chalk.bold.green(`\n✅ Iterative mutation testing completed after ${iteration} iteration(s)!\n`));
+}
+
+async function waitForIterationContinue(): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    console.log(chalk.bold('\n❓ Have you added the generated tests to your test suite?'));
+    rl.question(chalk.cyan('Press Enter to continue with next iteration, or type "stop" to finish: '), (answer) => {
+      rl.close();
+      const normalizedAnswer = answer.toLowerCase().trim();
+      resolve(normalizedAnswer !== 'stop' && normalizedAnswer !== 'quit' && normalizedAnswer !== 'exit');
+    });
+  });
+}
+
+async function askToContinue(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(chalk.cyan(`${question} (yes/no): `), (answer) => {
+      rl.close();
+      const normalizedAnswer = answer.toLowerCase().trim();
+      resolve(normalizedAnswer === 'yes' || normalizedAnswer === 'y');
+    });
+  });
+}
+
+function displayMutationResults(guardianScore: number, analysis: any): void {
+  console.log(chalk.bold.blue('\n🛡️ Guardian Mutation Analysis'));
+  console.log(chalk.cyan(`Guardian Mutation Score: ${guardianScore}/100 ${getScoreEmoji(guardianScore)}`));
+  console.log(chalk.dim(`${getScoreGrade(guardianScore)}`));
+  
+  console.log(chalk.cyan('\n📊 Quick Stats:'));
+  console.log(`  • Total mutations tested: ${analysis.summary.totalMutants}`);
+  console.log(`  • Mutations killed: ${analysis.summary.killedMutants} (${analysis.summary.basicMutationScore.toFixed(1)}%)`);
+  console.log(`  • Mutations survived: ${analysis.summary.survivedMutants}`);
+  if (analysis.summary.errorMutants > 0) {
+    console.log(`  • Test errors: ${analysis.summary.errorMutants}`);
+  }
+  
+  // Show top recommendations immediately
+  if (analysis.recommendations.length > 0) {
+    console.log(chalk.yellow('\n🎯 Top Recommendations:'));
+    analysis.recommendations.slice(0, 3).forEach((rec: string, index: number) => {
+      console.log(chalk.yellow(`  ${index + 1}. ${rec}`));
+    });
+  }
+  
+  // Show critical gaps if any
+  if (analysis.criticalGaps.length > 0) {
+    console.log(chalk.red('\n🚨 Critical Gaps (Immediate Attention Required):'));
+    analysis.criticalGaps.slice(0, 3).forEach((gap: any, index: number) => {
+      console.log(chalk.red(`  ${index + 1}. ${gap.file}:${gap.line} - ${gap.mutationType}`));
+      console.log(chalk.red(`     "${gap.original}" → "${gap.mutated}" (Priority: ${gap.priority})`));
+    });
+  }
+}
+
+function displayFinalResults(
+  guardianScore: number,
+  mutationResults: any[],
+  generatedTests: any[],
+  outputDir: string
+): void {
+  console.log(chalk.bold.green('\n✅ Mutation testing completed successfully!\n'));
+  console.log(chalk.cyan('Results:'));
+  console.log(`  • Guardian Mutation Score: ${guardianScore}/100 ${getScoreEmoji(guardianScore)}`);
+  console.log(`  • Total mutations: ${mutationResults.length}`);
+  console.log(`  • Killed mutations: ${mutationResults.filter((r: any) => r.status === 'killed').length}`);
+  console.log(`  • Survived mutations: ${mutationResults.filter((r: any) => r.status === 'survived').length}`);
+  console.log(`  • Basic mutation score: ${((mutationResults.filter((r: any) => r.status === 'killed').length / mutationResults.length) * 100).toFixed(2)}%`);
+  if (generatedTests.length > 0) {
+    console.log(`  • Generated test files: ${generatedTests.length}`);
+  }
+  console.log(`\nOutput saved to: ${chalk.underline(outputDir)}`);
+  console.log(`Detailed analysis: ${chalk.underline(path.join(outputDir, 'guardian-mutation-analysis.md'))}`);
 }
 
 async function displaySetupInstructions(repoPath: string): Promise<void> {

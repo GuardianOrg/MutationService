@@ -654,7 +654,7 @@ export class GambitService {
             ],
             outdir: `gambit_out_${path.basename(sourceFile, '.sol')}`, // Unique output dir per file
             solc: "solc", // Use just "solc" and rely on PATH 
-            num_mutants: 25
+            num_mutants: 5
           };
 
           // Auto-detect and use ALL remappings for proper import resolution
@@ -792,6 +792,10 @@ export class GambitService {
           isForgeProject
         );
         
+        // Store the mutant file location in the result for future iterations
+        (mutationResult as any).mutantId = mutant.id;
+        (mutationResult as any).outputDir = mutant.outputDir;
+        
         results.push(mutationResult);
         
         // Show progress
@@ -850,6 +854,33 @@ export class GambitService {
     const mutantFilePath = path.join(projectPath, mutantOutputDir, 'mutants', mutant.id.toString(), originalSourceFile);
     const backupFilePath = `${originalFilePath}.backup`;
     
+    // Set up cleanup handler for interruptions
+    let cleanupHandler: (() => Promise<void>) | null = null;
+    
+    const cleanup = async () => {
+      try {
+        // Always try to restore the original file
+        await fs.copyFile(backupFilePath, originalFilePath);
+        await fs.unlink(backupFilePath);
+        console.log(chalk.green(`    ✓ Restored original file: ${originalSourceFile}`));
+      } catch (restoreError) {
+        console.error(chalk.red(`    ❌ Failed to restore original file: ${restoreError}`));
+      }
+    };
+    
+    // Register cleanup handler for process interruption
+    cleanupHandler = cleanup;
+    const handleInterrupt = async () => {
+      console.log(chalk.yellow('\n⚠️  Interrupted! Restoring original files...'));
+      if (cleanupHandler) {
+        await cleanupHandler();
+      }
+      process.exit(1);
+    };
+    
+    process.once('SIGINT', handleInterrupt);
+    process.once('SIGTERM', handleInterrupt);
+    
     try {
       // Step 1: Backup original file
       await fs.copyFile(originalFilePath, backupFilePath);
@@ -884,6 +915,59 @@ export class GambitService {
       } catch (testError: any) {
         // If tests fail, mutant was killed
         console.log(chalk.green(`    💀 KILLED - Tests failed with this mutant`));
+        
+        // Log why it was killed
+        if (testError.code === 'ETIMEDOUT') {
+          console.log(chalk.dim(`    Reason: Test execution timed out after 2 minutes`));
+        } else if (testError.stderr) {
+          // Look for compilation errors first
+          if (testError.stderr.includes('Compilation failed') || testError.stderr.includes('CompilerError')) {
+            console.log(chalk.dim(`    Reason: Compilation failed (invalid mutation)`));
+          } else {
+            // Extract meaningful error lines, skipping warnings
+            const errorLines = testError.stderr.split('\n')
+              .filter((line: string) => 
+                line.trim() && 
+                !line.includes('Warning:') && 
+                !line.includes('nightly build') &&
+                (line.includes('Error:') || line.includes('error:') || line.includes('failed') || line.includes('FAILED'))
+              )
+              .slice(0, 3);
+            
+            if (errorLines.length > 0) {
+              console.log(chalk.dim(`    Reason: ${errorLines.join(' | ')}`));
+            } else {
+              // If no error lines found, check stdout for test failures
+              const testFailures = (testError.stdout || '').split('\n')
+                .filter((line: string) => 
+                  line.includes('FAILED') || 
+                  line.includes('[FAIL') || 
+                  line.includes('failing') ||
+                  line.includes('Test result:')
+                )
+                .slice(0, 2);
+              
+              if (testFailures.length > 0) {
+                console.log(chalk.dim(`    Reason: Test failures - ${testFailures.join(' | ')}`));
+              } else {
+                // Show exit code and any other info
+                console.log(chalk.dim(`    Reason: Exit code ${testError.code} (check full output for details)`));
+              }
+            }
+          }
+        } else {
+          // No stderr, check stdout
+          const output = testError.stdout || testError.message || '';
+          const meaningfulLine = output.split('\n')
+            .find((line: string) => 
+              line.trim() && 
+              !line.includes('Warning:') && 
+              !line.includes('nightly build')
+            ) || 'Unknown error';
+          
+          console.log(chalk.dim(`    Reason: ${meaningfulLine.substring(0, 100)}`));
+        }
+        
         return {
           file: originalSourceFile,
           line: mutant.line || 0,
@@ -910,13 +994,12 @@ export class GambitService {
       };
       
     } finally {
-      // Step 4: Always restore original file
-      try {
-        await fs.copyFile(backupFilePath, originalFilePath);
-        await fs.unlink(backupFilePath);
-      } catch (restoreError) {
-        console.error(chalk.red(`    ❌ Failed to restore original file: ${restoreError}`));
-      }
+      // Always restore original file
+      await cleanup();
+      
+      // Remove signal handlers
+      process.removeListener('SIGINT', handleInterrupt);
+      process.removeListener('SIGTERM', handleInterrupt);
     }
   }
 
@@ -1038,6 +1121,145 @@ export class GambitService {
 
   async getSurvivedMutations(results: MutationResult[]): Promise<MutationResult[]> {
     return results.filter(r => r.status === 'survived');
+  }
+
+  /**
+   * Re-test only the previously survived mutations
+   * This is much more efficient for iterative mode
+   */
+  async retestSurvivedMutations(
+    projectPath: string, 
+    previousResults: MutationResult[]
+  ): Promise<MutationResult[]> {
+    const survivedMutations = previousResults.filter(r => r.status === 'survived');
+    
+    if (survivedMutations.length === 0) {
+      console.log(chalk.green('No survived mutations to retest!'));
+      return previousResults;
+    }
+
+    console.log(chalk.blue(`\n🧬 Re-testing ${survivedMutations.length} previously survived mutations...`));
+    console.log(chalk.dim('  (Skipping mutations that were already killed)'));
+    
+    const foundryTomlPath = path.join(projectPath, 'foundry.toml');
+    const isForgeProject = await fs.access(foundryTomlPath).then(() => true).catch(() => false);
+    
+    // We'll build a new results array
+    const updatedResults: MutationResult[] = [];
+    
+    // Keep all previously killed mutations as killed (don't re-test them)
+    const killedMutations = previousResults.filter(r => r.status === 'killed');
+    updatedResults.push(...killedMutations);
+    console.log(chalk.dim(`  Keeping ${killedMutations.length} previously killed mutations`));
+    
+    // Now we need to re-test only the survived mutations
+    // The challenge is we need the mutant files, which were generated in specific directories
+    
+    // First, let's check if we still have the mutant files from the previous run
+    const mutantDirs = await this.findMutantDirectories(projectPath);
+    
+    if (mutantDirs.length === 0) {
+      console.log(chalk.yellow('\n⚠️  Mutant files from previous run not found. Running full mutation test...'));
+      return await this.runMutationTestingWithoutSetup(projectPath);
+    }
+    
+    // Re-test each survived mutation
+    let retestCount = 0;
+    for (const mutation of survivedMutations) {
+      retestCount++;
+      console.log(chalk.cyan(`\n🧬 Re-testing mutant ${retestCount}/${survivedMutations.length} in ${mutation.file}...`));
+      console.log(chalk.dim(`  Mutation: ${mutation.mutationType} at line ${mutation.line}`));
+      console.log(chalk.dim(`  Original: "${mutation.original}" → Mutated: "${mutation.mutated}"`));
+      
+      // Check if we have the mutant location info from the previous run
+      const mutantId = (mutation as any).mutantId;
+      const outputDir = (mutation as any).outputDir;
+      
+      if (!mutantId || !outputDir) {
+        console.log(chalk.yellow(`  ⚠️  Missing mutant location info, keeping as survived`));
+        updatedResults.push(mutation);
+        continue;
+      }
+      
+      // Verify the mutant file still exists
+      const mutantFilePath = path.join(projectPath, outputDir, 'mutants', mutantId.toString(), mutation.file);
+      try {
+        await fs.access(mutantFilePath);
+      } catch {
+        console.log(chalk.yellow(`  ⚠️  Mutant file not found at ${mutantFilePath}, keeping as survived`));
+        updatedResults.push(mutation);
+        continue;
+      }
+      
+      // Create a mutant object compatible with testSingleMutant
+      const mutant = {
+        id: mutantId,
+        mutationType: mutation.mutationType,
+        file: mutation.file,
+        line: mutation.line,
+        column: mutation.column,
+        original: mutation.original,
+        mutated: mutation.mutated,
+        sourceFile: mutation.file,
+        outputDir: outputDir
+      };
+      
+      // Test this specific mutant
+      const result = await this.testSingleMutant(
+        projectPath,
+        mutant,
+        mutation.file,
+        outputDir,
+        isForgeProject
+      );
+      
+      // Preserve the mutant location info
+      (result as any).mutantId = mutantId;
+      (result as any).outputDir = outputDir;
+      
+      updatedResults.push(result);
+      
+      // Show progress
+      const newKilled = updatedResults.filter(r => r.status === 'killed').length;
+      const stillSurvived = updatedResults.filter(r => r.status === 'survived').length;
+      console.log(chalk.dim(`  Progress: ${newKilled} killed (${killedMutations.length} previously + ${newKilled - killedMutations.length} new), ${stillSurvived} survived`));
+    }
+    
+    // Summary
+    const totalKilled = updatedResults.filter(r => r.status === 'killed').length;
+    const totalSurvived = updatedResults.filter(r => r.status === 'survived').length;
+    const improvement = survivedMutations.length - totalSurvived;
+    
+    console.log(chalk.blue(`\n📊 Re-testing Complete:`));
+    console.log(chalk.green(`  ✅ Killed ${improvement} additional mutations`));
+    console.log(chalk.yellow(`  🧟 ${totalSurvived} mutations still survived`));
+    console.log(chalk.cyan(`  📈 Total score: ${((totalKilled / updatedResults.length) * 100).toFixed(2)}%`));
+    
+    return updatedResults;
+  }
+
+  /**
+   * Find existing mutant directories from previous runs
+   */
+  private async findMutantDirectories(projectPath: string): Promise<string[]> {
+    const dirs: string[] = [];
+    try {
+      const entries = await fs.readdir(projectPath);
+      for (const entry of entries) {
+        if (entry.startsWith('gambit_out')) {
+          const mutantsDir = path.join(projectPath, entry, 'mutants');
+          try {
+            await fs.access(mutantsDir);
+            dirs.push(entry);
+          } catch {
+            // Directory doesn't have mutants subdirectory
+          }
+        }
+      }
+    } catch {
+      // Error reading directory
+    }
+    return dirs;
   }
 
   /**

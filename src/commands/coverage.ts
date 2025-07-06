@@ -24,28 +24,51 @@ export async function runCoverageAnalysis(options: CoverageOptions): Promise<voi
   const aiService = new AIService(options.openaiKey, options.model);
   
   let repoPath: string | null = null;
+  let isLocalMode = false;
 
   try {
-    // Step 1: Clone the repository
-    console.log(chalk.bold('Step 1: Cloning repository...'));
-    const tempDir = path.join(process.cwd(), '.coverage-analysis-temp');
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    repoPath = await gitService.cloneRepository(
-      options.repo,
-      tempDir,
-      options.branch,
-      options.token
-    );
+    // Step 1: Clone repository OR use local path
+    if (options.localPath) {
+      console.log(chalk.bold('Step 1: Using local repository...'));
+      repoPath = path.resolve(options.localPath);
+      isLocalMode = true;
+      
+      // Verify the path exists
+      try {
+        await fs.access(repoPath);
+        console.log(chalk.green(`✓ Using local repository at: ${repoPath}`));
+      } catch {
+        throw new Error(`Local repository path does not exist: ${repoPath}`);
+      }
+    } else if (options.repo) {
+      console.log(chalk.bold('Step 1: Cloning repository...'));
+      const tempDir = path.join(process.cwd(), '.coverage-analysis-temp');
+      await fs.mkdir(tempDir, { recursive: true });
+      
+      repoPath = await gitService.cloneRepository(
+        options.repo,
+        tempDir,
+        options.branch,
+        options.token
+      );
+    } else {
+      throw new Error('Either repo URL or local path must be provided');
+    }
 
-    // Step 2: Give setup instructions and wait for user confirmation
-    console.log(chalk.bold('\n📋 Step 2: Project Setup Required'));
-    await displayCoverageSetupInstructions(repoPath);
+    // Step 2: Check if already set up or needs setup
+    const needsSetup = !isLocalMode || !(await isProjectSetup(repoPath));
     
-    const isReady = await waitForUserConfirmation();
-    if (!isReady) {
-      console.log(chalk.yellow('\n⏸️  Setup cancelled. Please run the command again when your project is ready.'));
-      return;
+    if (needsSetup) {
+      console.log(chalk.bold('\n📋 Step 2: Project Setup Required'));
+      await displayCoverageSetupInstructions(repoPath);
+      
+      const isReady = await waitForUserConfirmation();
+      if (!isReady) {
+        console.log(chalk.yellow('\n⏸️  Setup cancelled. Please run the command again when your project is ready.'));
+        return;
+      }
+    } else {
+      console.log(chalk.bold('\n✅ Step 2: Project already set up'));
     }
 
     // Step 3: Analyze current coverage
@@ -99,8 +122,8 @@ export async function runCoverageAnalysis(options: CoverageOptions): Promise<voi
     console.error(chalk.red('\n❌ Error:'), error);
     throw error;
   } finally {
-    // Cleanup
-    if (repoPath && options.cleanup) {
+    // Cleanup only if not local mode and cleanup is enabled
+    if (repoPath && !isLocalMode && options.cleanup) {
       console.log(chalk.dim('\nCleaning up...'));
       await gitService.cleanup(repoPath);
     }
@@ -209,4 +232,22 @@ async function saveCoverageSummary(summary: string, outputDir: string): Promise<
   const summaryPath = path.join(outputDir, 'coverage-analysis-summary.md');
   await fs.writeFile(summaryPath, summary);
   console.log(chalk.green(`  ✓ Saved coverage analysis report`));
+}
+
+async function isProjectSetup(projectPath: string): Promise<boolean> {
+  // Check if project appears to be already set up
+  try {
+    // Check for common build artifacts
+    const foundryOut = path.join(projectPath, 'out');
+    const hardhatArtifacts = path.join(projectPath, 'artifacts');
+    const nodeModules = path.join(projectPath, 'node_modules');
+    
+    const foundryExists = await fs.access(foundryOut).then(() => true).catch(() => false);
+    const hardhatExists = await fs.access(hardhatArtifacts).then(() => true).catch(() => false);
+    const nodeModulesExists = await fs.access(nodeModules).then(() => true).catch(() => false);
+    
+    return foundryExists || (hardhatExists && nodeModulesExists);
+  } catch {
+    return false;
+  }
 } 
