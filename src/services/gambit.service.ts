@@ -654,7 +654,7 @@ export class GambitService {
             ],
             outdir: `gambit_out_${path.basename(sourceFile, '.sol')}`, // Unique output dir per file
             solc: "solc", // Use just "solc" and rely on PATH 
-            num_mutants: 5
+            num_mutants: 25
           };
 
           // Auto-detect and use ALL remappings for proper import resolution
