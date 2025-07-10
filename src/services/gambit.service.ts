@@ -680,10 +680,10 @@ export class GambitService {
           
           // Debug: Show what Gambit actually output
           if (gambitOutput && gambitOutput.trim()) {
-            console.log(chalk.dim(`  Gambit stdout: ${gambitOutput.trim().substring(0, 200)}...`));
+            console.log(chalk.dim(`  Gambit stdout: ${gambitOutput.trim().substring(0, 500)}${gambitOutput.trim().length > 500 ? '...' : ''}`));
           }
           if (gambitError && gambitError.trim()) {
-            console.log(chalk.yellow(`  Gambit stderr: ${gambitError.trim().substring(0, 200)}...`));
+            console.log(chalk.yellow(`  Gambit stderr: ${gambitError.trim().substring(0, 500)}${gambitError.trim().length > 500 ? '...' : ''}`));
           }
           
           console.log(chalk.green(`  ✅ Gambit completed for ${sourceFile}`));
@@ -730,10 +730,10 @@ export class GambitService {
               );
               
               if (simpleOutput && simpleOutput.trim()) {
-                console.log(chalk.dim(`  Simple Gambit stdout: ${simpleOutput.trim().substring(0, 200)}...`));
+                console.log(chalk.dim(`  Simple Gambit stdout: ${simpleOutput.trim().substring(0, 700)}${simpleOutput.trim().length > 500 ? '...' : ''}`));
               }
               if (simpleError && simpleError.trim()) {
-                console.log(chalk.yellow(`  Simple Gambit stderr: ${simpleError.trim().substring(0, 200)}...`));
+                console.log(chalk.yellow(`  Simple Gambit stderr: ${simpleError.trim().substring(0, 700)}${simpleError.trim().length > 500 ? '...' : ''}`));
               }
               
               const simpleMutants = await this.parseGambitMutants(projectPath, simpleConfig.outdir, sourceFile);
