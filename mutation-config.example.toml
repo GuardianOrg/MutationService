@@ -1,0 +1,34 @@
+# Forge Mutation Tester Configuration Example
+# Copy this file to mutation-config.toml and update with your settings
+
+[repository]
+# Choose ONE of the following options:
+
+# Option 1: Remote repository
+# url = "https://github.com/OpenZeppelin/openzeppelin-contracts"
+# branch = "master"  # Optional, defaults to 'main'
+# token = "ghp_your_github_token"  # Optional, only needed for private repos
+
+# Option 2: Local repository
+local_path = "./my-solidity-project"
+
+[openai]
+# Optional: OpenAI configuration for AI-powered test generation
+# If omitted, the tool will only run mutation testing without generating tests
+# api_key = "sk-your-openai-api-key-here"
+# model = "gpt-4-turbo-preview"  # Optional, defaults to gpt-4-turbo-preview
+
+[output]
+# Optional: Output directory for mutation results and generated tests
+# directory = "mutation-results"  # Default
+
+# Optional: Whether to clean up cloned repositories after testing
+# cleanup = true  # Default (only applies to remote repos, never cleans local)
+
+[testing]
+# Optional: Iterative testing mode (defaults to true)
+# Allows you to add tests and re-run to see improvement
+# iterative = true  # Set to false to run only once
+
+# Optional: Number of mutants to generate per file (defaults to 25)
+# num_mutants = 25  # Increase for more thorough testing, decrease for faster runs 

@@ -1,0 +1,21 @@
+# Forge Mutation Tester Configuration
+
+[repository]
+# Use EITHER url OR local_path, not both
+# url = "https://github.com/owner/repo"
+local_path = "../universal-vault-fuzz"
+# branch = "main"  # Optional, defaults to 'main'
+# token = "ghp_..."  # Optional, for private repos
+
+[openai]
+# Optional - only needed for AI test generation
+# api_key = "sk-..."  # Your OpenAI API key
+# model = "gpt-4-turbo-preview"  # Optional, defaults to 'gpt-4-turbo-preview'
+
+[output]
+# directory = "mutation-results"  # Optional, defaults to 'mutation-results'
+# cleanup = true  # Optional, defaults to true (only applies to cloned repos)
+
+[testing]
+# iterative = true  # Optional, defaults to true (set to false to disable)
+# num_mutants = 25  # Optional, defaults to 25 mutants per file

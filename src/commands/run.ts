@@ -1,12 +1,12 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import chalk from 'chalk';
-import { RunOptions, MutationSummary, MutationResult } from '../types';
 import { GitService } from '../services/git.service';
 import { GambitService } from '../services/gambit.service';
+import { RunOptions, MutationResult, GeneratedTest, MutationSession, MutationIteration } from '../types';
 import { AIService } from '../services/ai.service';
 import * as readline from 'readline';
-import { watch } from 'fs';
+
 
 // Helper functions for mutation analysis display
 function getScoreEmoji(score: number): string {
@@ -20,11 +20,35 @@ function getScoreEmoji(score: number): string {
 
 function getScoreGrade(score: number): string {
   if (score >= 90) return 'Grade: A - Exceptional test quality! Your tests are robust and comprehensive.';
-  if (score >= 80) return 'Grade: B - Good test coverage with room for improvement in critical areas.';
+  if (score >= 80) return 'Grade: B - Good test quality with room for improvement in critical areas.';
   if (score >= 70) return 'Grade: C - Moderate test quality. Focus on security and edge case testing.';
-  if (score >= 60) return 'Grade: D - Below average. Significant gaps in test coverage detected.';
+  if (score >= 60) return 'Grade: D - Below average. Significant gaps in test quality detected.';
   if (score >= 50) return 'Grade: F - Poor test quality. Consider adopting Test-Driven Development.';
   return 'Grade: F - Critical issues detected. Immediate attention required for production readiness.';
+}
+
+// Helper function to save mutation session data
+async function saveMutationSession(session: MutationSession, outputDir: string): Promise<void> {
+  const sessionPath = path.join(outputDir, 'mutation-session.json');
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(sessionPath, JSON.stringify(session, null, 2));
+  console.log(chalk.dim(`  Session data saved to: ${sessionPath}`));
+}
+
+// Helper function to save mutation results for current iteration
+async function saveMutationResults(
+  mutationResults: MutationResult[], 
+  outputDir: string, 
+  iterationNumber?: number
+): Promise<void> {
+  const filename = iterationNumber 
+    ? `mutation-results-iteration-${iterationNumber}.json`
+    : 'mutation-results.json';
+  const resultsPath = path.join(outputDir, filename);
+  
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(resultsPath, JSON.stringify(mutationResults, null, 2));
+  console.log(chalk.dim(`  Mutation results saved to: ${resultsPath}`));
 }
 
 export async function runMutationTest(options: RunOptions): Promise<void> {
@@ -36,6 +60,28 @@ export async function runMutationTest(options: RunOptions): Promise<void> {
   
   let repoPath: string | null = null;
   let isLocalMode = false;
+  
+  // Initialize mutation session
+  const session: MutationSession = {
+    sessionId: `session-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    projectPath: '',
+    config: {
+      repository: options.localPath ? { local_path: options.localPath } : { url: options.repo },
+      openai: options.openaiKey ? { api_key: options.openaiKey, model: options.model } : undefined,
+      output: { directory: options.output, cleanup: options.cleanup },
+      testing: { iterative: options.iterative }
+    },
+    iterations: [],
+    summary: {
+      totalMutations: 0,
+      killedMutations: 0,
+      survivedMutations: 0,
+      mutationScore: 0,
+      gaps: [],
+      generatedTests: []
+    }
+  };
 
   try {
     // Step 1: Clone repository OR use local path
@@ -86,7 +132,7 @@ export async function runMutationTest(options: RunOptions): Promise<void> {
     if (options.iterative) {
       await runIterativeMutationTesting(repoPath, options, gambitService, aiService);
     } else {
-      await runSingleMutationTest(repoPath, options, gambitService, aiService);
+      await runSingleMutationTest(repoPath, options, gambitService, aiService, session);
     }
 
   } catch (error) {
@@ -105,33 +151,36 @@ export async function runMutationTest(options: RunOptions): Promise<void> {
 }
 
 async function isProjectSetup(projectPath: string): Promise<boolean> {
-  // Check if project appears to be already set up
-  try {
-    // Check for common build artifacts
-    const foundryOut = path.join(projectPath, 'out');
-    const hardhatArtifacts = path.join(projectPath, 'artifacts');
-    const nodeModules = path.join(projectPath, 'node_modules');
-    
-    const foundryExists = await fs.access(foundryOut).then(() => true).catch(() => false);
-    const hardhatExists = await fs.access(hardhatArtifacts).then(() => true).catch(() => false);
-    const nodeModulesExists = await fs.access(nodeModules).then(() => true).catch(() => false);
-    
-    return foundryExists || (hardhatExists && nodeModulesExists);
-  } catch {
-    return false;
-  }
+  // Check if the project has been built
+  const foundryOut = path.join(projectPath, 'out');
+  const nodeModules = path.join(projectPath, 'node_modules');
+  
+  const foundryExists = await fs.access(foundryOut).then(() => true).catch(() => false);
+  const nodeModulesExists = await fs.access(nodeModules).then(() => true).catch(() => false);
+  
+  return foundryExists;
 }
 
 async function runSingleMutationTest(
   repoPath: string,
   options: RunOptions,
   gambitService: GambitService,
-  aiService: AIService
-): Promise<void> {
+  aiService: AIService,
+  session: MutationSession
+): Promise<MutationSession> {
   // Step 3: Setup and run mutation testing
   console.log(chalk.bold('\nStep 3: Setting up and running mutation tests...'));
   await gambitService.setupGambitConfigWithoutDependencies(repoPath);
-  const mutationResults = await gambitService.runMutationTestingWithoutSetup(repoPath);
+  const mutationResults = await gambitService.runMutationTestingWithoutSetup(repoPath, options.numMutants);
+  
+  // Add timestamp to results
+  const timestampedResults = mutationResults.map(r => ({
+    ...r,
+    timestamp: new Date().toISOString()
+  }));
+  
+  // Save mutation results immediately
+  await saveMutationResults(timestampedResults, options.output);
   
   // Step 4: Analyze mutation testing results
   console.log(chalk.bold('\nStep 4: Analyzing mutation testing results...'));
@@ -139,43 +188,88 @@ async function runSingleMutationTest(
   const mutationAnalysisResult = await gambitService.generateMutationAnalysis(mutationResults, repoPath);
   const { guardianScore, analysis, reportMarkdown } = mutationAnalysisResult;
   
-  // Display Guardian Mutation Score and key insights
-  displayMutationResults(guardianScore, analysis);
-
+  displayMutationResults(analysis, guardianScore);
+  
   if (analysis.summary.survivedMutants === 0) {
     console.log(chalk.green('\n✅ Excellent! All mutations were killed. Your test suite is comprehensive!'));
-    console.log(chalk.green('No gaps detected in your testing coverage.'));
+    console.log(chalk.green('No gaps detected in your test quality.'));
     
     // Save the analysis report even for perfect scores
     await saveMutationAnalysis(reportMarkdown, options.output);
-    console.log(chalk.bold.green('\n✅ Mutation testing completed successfully!\n'));
-    displayFinalResults(guardianScore, mutationResults, [], options.output);
-    return;
+    
+    // Update session
+    const iteration: MutationIteration = {
+      iterationNumber: 1,
+      timestamp: new Date().toISOString(),
+      mutationResults: timestampedResults,
+      generatedTests: [],
+      stats: {
+        total: analysis.summary.totalMutations,
+        killed: analysis.summary.killedMutations,
+        survived: 0,
+        timeout: timestampedResults.filter(r => r.status === 'timeout').length,
+        error: timestampedResults.filter(r => r.status === 'error').length
+      }
+    };
+    
+    session.iterations.push(iteration);
+    session.summary = analysis.summary;
+    await saveMutationSession(session, options.output);
+    
+    return session;
   }
-
+  
   const survivedMutationResults = mutationResults.filter(r => r.status === 'survived');
-  console.log(chalk.yellow(`\n⚠️  Found ${analysis.summary.survivedMutants} survived mutations indicating gaps in test coverage`));
-
-  // Step 5: Generate tests for gaps
-  console.log(chalk.bold('\nStep 5: Generating tests to cover gaps...'));
-  const gaps = await aiService.analyzeGaps(survivedMutationResults, repoPath);
-  const generatedTests = await aiService.generateTests(gaps, repoPath);
-
-  // Step 6: Save generated tests
-  console.log(chalk.bold('\nStep 6: Saving generated tests...'));
-  await saveGeneratedTests(generatedTests, options.output);
-
+  console.log(chalk.yellow(`\n⚠️  Found ${analysis.summary.survivedMutants} survived mutations indicating gaps in test quality`));
+  
+  // Step 5: Generate tests for gaps (only if API key provided)
+  let generatedTests: GeneratedTest[] = [];
+  if (options.openaiKey) {
+    console.log(chalk.bold('\nStep 5: Generating tests to cover gaps...'));
+    const gaps = await aiService.analyzeGaps(survivedMutationResults, repoPath);
+    generatedTests = await aiService.generateTests(gaps, repoPath);
+    
+    // Step 6: Save generated tests
+    console.log(chalk.bold('\nStep 6: Saving generated tests...'));
+    await saveGeneratedTests(generatedTests, options.output);
+  } else {
+    console.log(chalk.yellow('\n⚠️  Skipping test generation (no OpenAI API key provided)'));
+    console.log(chalk.dim('  To generate tests, add your OpenAI API key to the configuration.'));
+  }
+  
   // Step 7: Save mutation analysis report
   console.log(chalk.bold('\nStep 7: Saving mutation analysis report...'));
   await saveMutationAnalysis(reportMarkdown, options.output);
-
-  // Step 8: Generate and save summary
-  console.log(chalk.bold('\nStep 8: Generating summary report...'));
-  const summary = await aiService.generateSummary(mutationResults, generatedTests);
-  await saveSummary(summary, options.output);
-
-  // Display results
-  displayFinalResults(guardianScore, mutationResults, generatedTests, options.output);
+  
+  // Step 8: Generate summary report
+  if (options.openaiKey) {
+    console.log(chalk.bold('\nStep 8: Generating summary report...'));
+    const summaryReport = await aiService.generateSummary(timestampedResults, generatedTests);
+    await saveSummary(summaryReport, options.output);
+  }
+  
+  // Update session
+  const iteration: MutationIteration = {
+    iterationNumber: 1,
+    timestamp: new Date().toISOString(),
+    mutationResults: timestampedResults,
+    generatedTests,
+    stats: {
+      total: analysis.summary.totalMutations,
+      killed: analysis.summary.killedMutations,
+      survived: analysis.summary.survivedMutations,
+      timeout: timestampedResults.filter(r => r.status === 'timeout').length,
+      error: timestampedResults.filter(r => r.status === 'error').length
+    }
+  };
+  
+  session.iterations.push(iteration);
+  session.summary = analysis.summary;
+  await saveMutationSession(session, options.output);
+  
+  displayFinalResults(analysis, guardianScore, generatedTests.length, options.output);
+  
+  return session;
 }
 
 async function runIterativeMutationTesting(
@@ -201,7 +295,7 @@ async function runIterativeMutationTesting(
     
     // For first iteration, run full test. For subsequent, we could optimize to only test survived
     const mutationResults = iteration === 1 
-      ? await gambitService.runMutationTestingWithoutSetup(repoPath)
+      ? await gambitService.runMutationTestingWithoutSetup(repoPath, options.numMutants)
       : await gambitService.retestSurvivedMutations(repoPath, allMutationResults);
     
     // Store results for next iteration
@@ -212,7 +306,7 @@ async function runIterativeMutationTesting(
     const { guardianScore, analysis, reportMarkdown } = mutationAnalysisResult;
     
     // Display results
-    displayMutationResults(guardianScore, analysis);
+    displayMutationResults(analysis, guardianScore);
     
     const survivedMutations = mutationResults.filter(r => r.status === 'survived');
     const survivedCount = survivedMutations.length;
@@ -220,10 +314,10 @@ async function runIterativeMutationTesting(
     // Check if we've reached perfection
     if (survivedCount === 0) {
       console.log(chalk.green('\n🎉 Perfect! All mutations have been killed!'));
-      console.log(chalk.green('Your test suite now provides comprehensive coverage.'));
+                console.log(chalk.green('Your test suite now provides comprehensive quality assurance.'));
       
       await saveMutationAnalysis(reportMarkdown, options.output);
-      displayFinalResults(guardianScore, mutationResults, [], options.output);
+      displayFinalResults(analysis, guardianScore, 0, options.output); // No generated tests in iterative mode
       break;
     }
     
@@ -347,7 +441,7 @@ async function askToContinue(question: string): Promise<boolean> {
   });
 }
 
-function displayMutationResults(guardianScore: number, analysis: any): void {
+function displayMutationResults(analysis: any, guardianScore: number): void {
   console.log(chalk.bold.blue('\n🛡️ Guardian Mutation Analysis'));
   console.log(chalk.cyan(`Guardian Mutation Score: ${guardianScore}/100 ${getScoreEmoji(guardianScore)}`));
   console.log(chalk.dim(`${getScoreGrade(guardianScore)}`));
@@ -378,24 +472,21 @@ function displayMutationResults(guardianScore: number, analysis: any): void {
   }
 }
 
-function displayFinalResults(
-  guardianScore: number,
-  mutationResults: any[],
-  generatedTests: any[],
-  outputDir: string
-): void {
+function displayFinalResults(analysis: any, guardianScore: number, generatedTestsCount: number, outputDir: string): void {
   console.log(chalk.bold.green('\n✅ Mutation testing completed successfully!\n'));
   console.log(chalk.cyan('Results:'));
   console.log(`  • Guardian Mutation Score: ${guardianScore}/100 ${getScoreEmoji(guardianScore)}`);
-  console.log(`  • Total mutations: ${mutationResults.length}`);
-  console.log(`  • Killed mutations: ${mutationResults.filter((r: any) => r.status === 'killed').length}`);
-  console.log(`  • Survived mutations: ${mutationResults.filter((r: any) => r.status === 'survived').length}`);
-  console.log(`  • Basic mutation score: ${((mutationResults.filter((r: any) => r.status === 'killed').length / mutationResults.length) * 100).toFixed(2)}%`);
-  if (generatedTests.length > 0) {
-    console.log(`  • Generated test files: ${generatedTests.length}`);
+  console.log(`  • Total mutations: ${analysis.summary.totalMutations}`);
+  console.log(`  • Killed mutations: ${analysis.summary.killedMutations}`);
+  console.log(`  • Survived mutations: ${analysis.summary.survivedMutations}`);
+  console.log(`  • Basic mutation score: ${analysis.summary.mutationScore.toFixed(2)}%`);
+  if (generatedTestsCount > 0) {
+    console.log(`  • Generated test files: ${generatedTestsCount}`);
   }
   console.log(`\nOutput saved to: ${chalk.underline(outputDir)}`);
-  console.log(`Detailed analysis: ${chalk.underline(path.join(outputDir, 'guardian-mutation-analysis.md'))}`);
+  console.log(chalk.dim('Detailed analysis: ') + chalk.underline(path.join(outputDir, 'guardian-mutation-analysis.md')));
+  
+  console.log(chalk.bold('\n💡 See the detailed analysis report for ' + analysis.recommendations.length + ' recommendations'));
 }
 
 async function displaySetupInstructions(repoPath: string): Promise<void> {
@@ -404,55 +495,18 @@ async function displaySetupInstructions(repoPath: string): Promise<void> {
 
   // Check project type
   const foundryTomlExists = await fs.access(path.join(repoPath, 'foundry.toml')).then(() => true).catch(() => false);
-  const hardhatConfigExists = await fs.access(path.join(repoPath, 'hardhat.config.js')).then(() => true).catch(() => 
-    fs.access(path.join(repoPath, 'hardhat.config.ts')).then(() => true).catch(() => false)
-  );
-
+  
   if (foundryTomlExists) {
     console.log(chalk.green('🔨 Detected Forge/Foundry project\n'));
-    console.log(chalk.yellow('Run these commands in your terminal:\n'));
-    console.log(chalk.cyan(`cd ${repoPath}`));
+    console.log(chalk.cyan('cd ' + repoPath));
     console.log(chalk.cyan('forge install'));
     console.log(chalk.cyan('forge build'));
     console.log(chalk.cyan('forge test'));
-    console.log(chalk.yellow('\n📦 Install Solidity compiler (EXACT VERSION REQUIRED):'));
-    console.log(chalk.cyan('# Check your project\'s solidity version first:'));
-    console.log(chalk.cyan('grep "pragma solidity" src/*.sol | head -1'));
-    console.log(chalk.cyan('# Install solc-select and matching version:'));
-    console.log(chalk.cyan('pip3 install solc-select'));
-    console.log(chalk.cyan('solc-select install 0.8.26  # Use your project\'s version'));
-    console.log(chalk.cyan('solc-select use 0.8.26'));
-    console.log(chalk.cyan('export PATH="/Users/$USER/Library/Python/3.9/bin:$PATH"'));
-  } else if (hardhatConfigExists) {
-    console.log(chalk.green('⚒️  Detected Hardhat project\n'));
-    console.log(chalk.yellow('Run these commands in your terminal:\n'));
-    console.log(chalk.cyan(`cd ${repoPath}`));
-    console.log(chalk.cyan('npm install'));
-    console.log(chalk.cyan('npx hardhat compile'));
-    console.log(chalk.cyan('npx hardhat test'));
-    console.log(chalk.yellow('\n📦 Install Solidity compiler (EXACT VERSION REQUIRED):'));
-    console.log(chalk.cyan('# Check your project\'s solidity version first:'));
-    console.log(chalk.cyan('grep "pragma solidity" contracts/*.sol | head -1'));
-    console.log(chalk.cyan('# Install solc-select and matching version:'));
-    console.log(chalk.cyan('pip3 install solc-select'));
-    console.log(chalk.cyan('solc-select install <YOUR_VERSION>  # e.g., 0.8.26'));
-    console.log(chalk.cyan('solc-select use <YOUR_VERSION>'));
-    console.log(chalk.cyan('export PATH="/Users/$USER/Library/Python/3.9/bin:$PATH"'));
   } else {
-    console.log(chalk.yellow('❓ Unknown project type detected\n'));
-    console.log(chalk.yellow('Please ensure your project is set up with:\n'));
-    console.log(chalk.cyan(`cd ${repoPath}`));
-    console.log(chalk.cyan('# Install dependencies'));
-    console.log(chalk.cyan('# Compile contracts'));
-    console.log(chalk.cyan('# Run tests to ensure they pass'));
-    console.log(chalk.cyan('# Install solc globally (see below)'));
-    console.log(chalk.yellow('\n📦 Install Solidity compiler (EXACT VERSION REQUIRED):'));
-    console.log(chalk.cyan('# Check your project\'s solidity version first'));
-    console.log(chalk.cyan('# Install solc-select and matching version:'));
-    console.log(chalk.cyan('pip3 install solc-select'));
-    console.log(chalk.cyan('solc-select install <YOUR_VERSION>'));
-    console.log(chalk.cyan('solc-select use <YOUR_VERSION>'));
-    console.log(chalk.cyan('export PATH="/Users/$USER/Library/Python/3.9/bin:$PATH"'));
+    console.log(chalk.yellow('⚠️  No foundry.toml detected\n'));
+    console.log(chalk.dim('Make sure your project is compiled before proceeding.'));
+    console.log(chalk.cyan('cd ' + repoPath));
+    console.log(chalk.cyan('# Run your project\'s build command'));
   }
 
   console.log(chalk.bold('\n✅ Requirements:'));

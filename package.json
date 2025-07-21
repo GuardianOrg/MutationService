@@ -1,7 +1,7 @@
 {
   "name": "forge-mutation-tester",
   "version": "2.1.0",
-  "description": "AI-powered mutation testing and coverage analysis tool for Solidity smart contracts using Gambit and OpenAI",
+  "description": "AI-powered mutation testing tool for Solidity smart contracts using Gambit and OpenAI",
   "main": "dist/index.js",
   "bin": {
     "forge-mutation-tester": "dist/cli.js"
@@ -19,10 +19,8 @@
     "smart-contracts",
     "mutation-testing",
     "testing",
-    "coverage",
     "forge",
     "foundry",
-    "hardhat",
     "gambit",
     "ai",
     "openai",
@@ -48,16 +46,17 @@
     "dist/**/*",
     "README.md",
     "USAGE.md",
-    "LICENSE"
+    "LICENSE",
+    "mutation-config.example.toml"
   ],
   "dependencies": {
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
-    "dotenv": "^16.3.1",
     "glob": "^10.3.10",
     "openai": "^4.20.1",
     "ora": "^5.4.1",
-    "simple-git": "^3.19.1"
+    "simple-git": "^3.19.1",
+    "toml": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.8.0",

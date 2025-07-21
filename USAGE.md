@@ -1,174 +1,263 @@
-# Mutation Testing Usage Guide
+# Forge Mutation Tester - Usage Guide
+
+This guide covers how to use the Forge Mutation Tester with TOML configuration files.
 
 ## Quick Start
 
-```bash
-# Install
-npm install -g forge-mutation-tester
-
-# Set OpenAI key (required)
-export OPENAI_API_KEY="sk-..."
-
-# Run on existing local project
-forge-mutation-tester run -l .
-
-# Run on remote repo
-forge-mutation-tester run -r https://github.com/user/repo
-```
-
-## Running on Existing Projects
-
-### Option 1: Local Directory (Recommended)
-```bash
-# From your project root
-cd /path/to/your/project
-forge-mutation-tester run -l .
-
-# Or specify path
-forge-mutation-tester run -l /path/to/your/project
-```
-
-### Option 2: Remote Repository
-```bash
-# Public repo
-forge-mutation-tester run -r https://github.com/user/repo
-
-# Private repo (need GitHub token)
-forge-mutation-tester run -r https://github.com/user/repo -t YOUR_GITHUB_TOKEN
-```
-
-## OpenAI API Key
-
-Three ways to provide it:
-
-```bash
-# 1. Environment variable (recommended)
-export OPENAI_API_KEY="sk-..."
-
-# 2. Command line flag
-forge-mutation-tester run -l . --openai-key "sk-..."
-
-# 3. .env file in current directory
-echo 'OPENAI_API_KEY=sk-...' > .env
-```
-
-## How Iterative Mode Works
-
-Iterative mode lets you progressively improve your test suite:
-
-```bash
-# Enable with --iterative flag
-forge-mutation-tester run -l . --iterative
-```
-
-**What happens:**
-
-1. **First Run**: Finds all survived mutations (e.g., 8 survived)
-2. **Generates Tests**: Creates tests to kill those mutations
-3. **You Add Tests**: Copy relevant tests to your test suite
-4. **Press Enter**: Tool re-runs mutation testing
-5. **Shows Progress**: "Killed 3 more mutations!" (5 remain)
-6. **Repeat**: Until all mutations killed or you're satisfied
-
-**Example Session:**
-```
-Iteration 1: 25 mutations → 17 killed, 8 survived
-  → Generated 3 test files in ./generated-tests/iteration-1/
-  → You add tests to your project
-  → Press Enter
-
-Iteration 2: 25 mutations → 22 killed, 3 survived ✅ Progress!
-  → Generated 2 test files in ./generated-tests/iteration-2/
-  → You add tests
-  → Press Enter
-
-Iteration 3: 25 mutations → 25 killed, 0 survived 🎉 Perfect!
-```
-
-## Common Commands
-
-### Basic Mutation Test
-```bash
-# Simplest - run in current directory
-forge-mutation-tester run -l .
-```
-
-### With Custom Output
-```bash
-# Save results to specific folder
-forge-mutation-tester run -l . -o ./mutation-results
-```
-
-### Iterative Improvement
-```bash
-# Keep improving until perfect
-forge-mutation-tester run -l . --iterative
-```
-
-### Different AI Model
-```bash
-# Use GPT-4 (default) or others
-forge-mutation-tester run -l . --model gpt-4-turbo-preview
-```
-
-## What You Need Before Running
-
-1. **Compiled Project**: Run `forge build` or `npx hardhat compile` first
-2. **Passing Tests**: Make sure `forge test` or `npx hardhat test` passes
-3. **Solc Installed**: Exact version matching your project
+1. **Install the tool**:
    ```bash
-   # Check your version
-   grep "pragma solidity" src/*.sol
-   
-   # Install it
-   pip3 install solc-select
-   solc-select install 0.8.26
-   solc-select use 0.8.26
+   npm install -g forge-mutation-tester
    ```
 
-## Understanding Results
+2. **Create a configuration file**:
+   ```bash
+   forge-mutation-tester init
+   ```
 
-**Guardian Score**: 0-100 rating of your test quality
-- 90+ 🏆 Excellent
-- 80-89 🥇 Good  
-- 70-79 🥈 Moderate
-- 60-69 🥉 Below Average
-- <60 🚨 Needs Work
+3. **Edit `mutation-config.toml`** with your settings
 
-**Output Files**:
+4. **Run mutation testing**:
+   ```bash
+   forge-mutation-tester mutation-config.toml
+   ```
+
+## Configuration File Format
+
+The tool uses TOML format for configuration. Here's the structure:
+
+```toml
+[repository]
+# Choose ONE: remote URL or local path
+url = "https://github.com/owner/repo"     # Remote repository
+# OR
+local_path = "./my-project"               # Local directory
+
+branch = "main"                           # Optional (remote only)
+token = "ghp_..."                         # Optional (private repos)
+
+[openai]
+# Optional - only needed for AI test generation
+api_key = "sk-..."                        # Your OpenAI API key
+model = "gpt-4-turbo-preview"             # Optional model selection
+
+[output]
+directory = "mutation-results"             # Optional
+cleanup = true                            # Optional (remote only)
+
+[testing]
+# iterative = true                        # Default, set to false for single run
+# num_mutants = 25                        # Number of mutants per file (default: 25)
 ```
-generated-tests/
-├── Token.mutation.t.sol         # Generated test files
-├── Vault.mutation.t.sol         
-├── guardian-mutation-analysis.md # Detailed analysis
-└── mutation-testing-summary.md   # Summary report
+
+## Common Use Cases
+
+### 1. Basic Mutation Testing (No AI)
+
+```toml
+[repository]
+local_path = "."  # Current directory
+
+# No [openai] section needed
+```
+
+This will:
+- Run mutation testing on your project
+- Save all results to `mutation-results/`
+- Show which mutations survived
+- Allow manual test writing
+
+### 2. Full AI-Powered Testing
+
+```toml
+[repository]
+local_path = "./my-project"
+
+[openai]
+api_key = "sk-your-key"
+```
+
+This adds:
+- Automatic test generation for survived mutations
+- AI analysis of gaps
+- Generated test files ready to add to your suite
+
+### 3. Private Repository
+
+```toml
+[repository]
+url = "https://github.com/myorg/private-repo"
+token = "ghp_your_github_token"
+
+[openai]
+api_key = "sk-your-key"
+```
+
+### 4. Iterative Testing
+
+```toml
+[repository]
+local_path = "./my-project"
+
+[openai]
+api_key = "sk-your-key"
+
+[testing]
+# iterative = true  # Default, re-run after adding tests
+# num_mutants = 50  # Generate more mutants for thorough testing
+```
+
+## Iterative Testing Workflow
+
+By default (or when `iterative = true`), the tool helps you progressively improve your test suite:
+
+```
+┌─────────────────┐
+│ Run Mutation    │
+│ Testing         │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Generate Tests  │
+│ for Survivors   │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ You: Add Tests  │
+│ to Your Suite   │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Re-run Only     │
+│ Previous        │
+│ Survivors       │
+└────────┬────────┘
+         │
+         ▼
+    [Repeat]
+```
+
+### Example Iterative Session
+
+```bash
+$ forge-mutation-tester config.toml
+
+━━━ Iteration 1 ━━━
+Total mutations: 50
+Killed: 35 (70%)
+Survived: 15
+
+Generating tests for 15 survived mutations...
+✓ Generated 3 test files
+
+Press Enter to continue after adding tests...
+
+━━━ Iteration 2 ━━━
+Re-testing 15 previously survived mutations...
+✅ Progress! Killed 8 more mutations
+Remaining: 7
+
+[Continue until satisfied]
+```
+
+## Advanced Configuration
+
+### Custom Output Directory
+
+```toml
+[output]
+directory = "./my-mutation-tests"
+```
+
+### Different AI Models
+
+```toml
+[openai]
+api_key = "sk-..."
+model = "gpt-4"  # or "gpt-3.5-turbo" for faster/cheaper
+```
+
+### Keep Cloned Repos
+
+```toml
+[output]
+cleanup = false  # Don't delete cloned repos
+```
+
+### Controlling Mutation Count
+
+Adjust the number of mutants generated per file:
+
+```toml
+[testing]
+num_mutants = 10   # Quick testing with fewer mutants
+# OR
+num_mutants = 50   # Thorough testing with more mutants
+```
+
+The default is 25 mutants per file, which provides a good balance between thoroughness and speed.
+
+## Stored Results
+
+All mutation results are automatically saved:
+
+### Session File (`mutation-session.json`)
+Contains complete session data including:
+- All iterations and their results
+- Configuration used
+- Timestamps
+- Summary statistics
+
+### Mutation Results (`mutation-results.json`)
+Detailed results for each mutation:
+- File, line, and column
+- Original vs mutated code
+- Status (killed/survived/timeout/error)
+- Kill reason (if killed)
+- Timestamp
+
+### Per-Iteration Results
+In iterative mode, each iteration's results are saved separately:
+- `mutation-results-iteration-1.json`
+- `mutation-results-iteration-2.json`
+- etc.
+
+## Using Results for Analysis
+
+The stored JSON files can be used for:
+- Tracking mutation testing progress over time
+- Analyzing patterns in survived mutations
+- Building custom reports or visualizations
+- Integrating with CI/CD pipelines
+
+Example: Reading results programmatically
+```javascript
+const session = JSON.parse(fs.readFileSync('mutation-results/mutation-session.json'));
+console.log(`Total iterations: ${session.iterations.length}`);
+console.log(`Final mutation score: ${session.summary.mutationScore}%`);
 ```
 
 ## Troubleshooting
 
-**"Solc not found"**
-```bash
-# Install exact version your project uses
-pip3 install solc-select
-solc-select install 0.8.26  # Your version
-solc-select use 0.8.26
-export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+### OpenAI API Key
+
+The tool can work with or without an OpenAI API key:
+
+**With API key**: Full functionality including AI test generation
+```toml
+[openai]
+api_key = "sk-proj-..."  # Your actual key
 ```
 
-**"No mutations generated"**
-- Check Solidity version (0.8.28+ may have issues)
-- Ensure project compiles: `forge build`
-- Try simpler contracts first
+**Without API key**: Mutation testing only (no test generation)
+```toml
+# Omit the [openai] section entirely
+```
 
-**"Tests still failing"**
-- Review generated tests before adding
-- Some generated tests may need tweaking
-- Focus on understanding why mutations survived
+### Project Setup
 
-## Tips
-
-1. **Start Small**: Test one contract at a time
-2. **Review Tests**: Don't blindly copy generated tests
-3. **Understand Mutations**: Learn why they survived
-4. **Set Goals**: Aim for 80%+ Guardian Score
-5. **Use Iterative**: Let the tool guide improvement 
+Before running mutation testing, ensure:
+- `forge test` passes
+- Project compiles: `

@@ -79,6 +79,55 @@ export class GambitService {
     }
   }
 
+  async compileProject(projectPath: string): Promise<void> {
+    const spinner = ora('Compiling project...').start();
+    
+    try {
+      // Check for Foundry
+      const foundryConfigPath = path.join(projectPath, 'foundry.toml');
+      const isForgeProject = await fs.access(foundryConfigPath).then(() => true).catch(() => false);
+      
+      if (isForgeProject) {
+        spinner.text = 'Compiling Forge contracts...';
+        console.log(chalk.dim('  Running: forge build'));
+        
+        try {
+          await execAsync('forge build', { 
+            cwd: projectPath,
+            timeout: 180000 // 3 minutes
+          });
+          spinner.succeed(chalk.green('Project compiled successfully'));
+        } catch (compileError: any) {
+          if (compileError.killed && compileError.signal === 'SIGTERM') {
+            spinner.fail(chalk.red('Forge build timed out after 3 minutes'));
+            throw new Error('Compilation timeout - project may be too large or have dependency issues');
+          }
+          
+          // Log the actual error
+          console.error(chalk.red('\nCompilation error:'));
+          console.error(chalk.dim(compileError.stdout || ''));
+          console.error(chalk.yellow(compileError.stderr || ''));
+          
+          // Try with --force flag
+          spinner.text = 'Retrying with --force flag...';
+          console.log(chalk.dim('  Trying: forge build --force'));
+          await execAsync('forge build --force', { 
+            cwd: projectPath,
+            timeout: 180000 
+          });
+          spinner.succeed(chalk.green('Project compiled with --force flag'));
+        }
+      } else {
+        spinner.warn(chalk.yellow('Could not detect Forge project. Assuming project is already compiled.'));
+        console.log(chalk.dim('  No foundry.toml found'));
+        console.log(chalk.dim('  Make sure your contracts are compiled before proceeding.'));
+      }
+    } catch (error) {
+      spinner.fail(chalk.red('Failed to compile project'));
+      throw error;
+    }
+  }
+
   async prepareProject(projectPath: string): Promise<void> {
     const spinner = ora('Preparing project for mutation testing...').start();
     
@@ -136,105 +185,9 @@ export class GambitService {
           throw buildError;
         }
       } else {
-        // Check for Hardhat
-        const hardhatConfigPath = path.join(projectPath, 'hardhat.config.js');
-        const hardhatConfigTsPath = path.join(projectPath, 'hardhat.config.ts');
-        const isHardhatProject = await fs.access(hardhatConfigPath).then(() => true).catch(() => 
-          fs.access(hardhatConfigTsPath).then(() => true).catch(() => false)
-        );
-        
-        if (isHardhatProject) {
-          spinner.text = 'Detected Hardhat project, checking package.json...';
-          console.log(chalk.dim(`  Project path: ${projectPath}`));
-          
-          // Install dependencies
-          spinner.text = 'Installing npm dependencies...';
-          console.log(chalk.dim('  Running: npm install'));
-          console.log(chalk.dim('  This may take a while...'));
-          
-          try {
-            await execAsync('npm install', { 
-              cwd: projectPath,
-              timeout: 180000 // 3 minute timeout
-            });
-            console.log(chalk.dim('  Dependencies installed'));
-          } catch (installError: any) {
-            if (installError.code === 'ETIMEDOUT') {
-              spinner.fail(chalk.red('npm install timed out after 3 minutes'));
-              throw new Error('Install timeout - check network connection');
-            }
-            throw installError;
-          }
-          
-          // Check for and run any setup scripts
-          try {
-            const packageJsonPath = path.join(projectPath, 'package.json');
-            const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
-            
-            // Common setup script names
-            const setupScripts = ['setup', 'prepare', 'postinstall', 'build:dependencies'];
-            
-            for (const scriptName of setupScripts) {
-              if (packageJson.scripts && packageJson.scripts[scriptName]) {
-                spinner.text = `Running ${scriptName} script...`;
-                console.log(chalk.dim(`  Running: npm run ${scriptName}`));
-                try {
-                  await execAsync(`npm run ${scriptName}`, { 
-                    cwd: projectPath,
-                    maxBuffer: 1024 * 1024 * 10,
-                    timeout: 120000 // 2 minute timeout per script
-                  });
-                  console.log(chalk.dim(`  ${scriptName} completed`));
-                } catch (e: any) {
-                  console.warn(chalk.yellow(`  Warning: ${scriptName} script failed: ${e.message?.split('\n')[0]}`));
-                }
-              }
-            }
-          } catch (e) {
-            console.log(chalk.dim('  No package.json found or unable to read'));
-          }
-          
-          // Try to compile
-          spinner.text = 'Compiling Hardhat contracts...';
-          console.log(chalk.dim('  Running: npx hardhat compile'));
-          
-          try {
-            await execAsync('npx hardhat compile', { 
-              cwd: projectPath,
-              maxBuffer: 1024 * 1024 * 10,
-              timeout: 180000 // 3 minute timeout
-            });
-            spinner.succeed(chalk.green('Project compiled successfully'));
-          } catch (compileError: any) {
-            if (compileError.code === 'ETIMEDOUT') {
-              spinner.fail(chalk.red('Hardhat compile timed out after 3 minutes'));
-              throw new Error('Compile timeout - project may be too large');
-            }
-            
-            // If compilation fails due to missing files, try to create them or skip
-            if (compileError.message.includes('Cannot find module')) {
-              spinner.warn(chalk.yellow('Project has missing dependencies, attempting to continue...'));
-              console.log(chalk.dim(`  Error: ${compileError.message.split('\n')[0]}`));
-              
-              // Try to at least compile the contracts directory
-              try {
-                console.log(chalk.dim('  Trying: npx hardhat compile --force'));
-                await execAsync('npx hardhat compile --force', { 
-                  cwd: projectPath,
-                  maxBuffer: 1024 * 1024 * 10,
-                  timeout: 120000
-                });
-              } catch {
-                spinner.warn(chalk.yellow('Could not compile project, will attempt mutation testing anyway'));
-              }
-            } else {
-              throw compileError;
-            }
-          }
-        } else {
-          spinner.warn(chalk.yellow('Could not detect project type (Forge/Hardhat). Assuming project is already compiled.'));
-          console.log(chalk.dim('  No foundry.toml or hardhat.config found'));
-        }
+        spinner.warn(chalk.yellow('Could not detect Forge project (no foundry.toml found).'));
+        console.log(chalk.dim('  Assuming project is already compiled.'));
+        console.log(chalk.dim('  Make sure you have run "forge build" before proceeding.'));
       }
     } catch (error: any) {
       spinner.fail(chalk.red('Failed to prepare project'));
@@ -277,14 +230,7 @@ export class GambitService {
             solcPath = stdout.trim();
           }
         } catch {
-          // Try npx hardhat compile --show-stack-traces to get solc path
-          try {
-            const { stdout } = await execAsync('npx hardhat compile --help | grep solc', { cwd: projectPath });
-            // If hardhat is available, use it to compile
-            solcPath = "npx hardhat compile";
-          } catch {
-            console.warn(chalk.yellow('Warning: solc not found, Gambit may fail'));
-          }
+          console.warn(chalk.yellow('Warning: solc not found in node_modules, Gambit may fail'));
         }
       }
       
@@ -505,7 +451,7 @@ export class GambitService {
     }
   }
 
-  async runMutationTestingWithoutSetup(projectPath: string): Promise<MutationResult[]> {
+  async runMutationTestingWithoutSetup(projectPath: string, numMutants: number = 25): Promise<MutationResult[]> {
     const spinner = ora('Running mutation testing...').start();
     
     try {
@@ -654,7 +600,7 @@ export class GambitService {
             ],
             outdir: `gambit_out_${path.basename(sourceFile, '.sol')}`, // Unique output dir per file
             solc: "solc", // Use just "solc" and rely on PATH 
-            num_mutants: 25
+            num_mutants: numMutants // Use the provided numMutants
           };
 
           // Auto-detect and use ALL remappings for proper import resolution
@@ -709,7 +655,7 @@ export class GambitService {
               mutations: ["binary-op-mutation", "require-mutation"], // Just 2 simple mutation types
               outdir: `gambit_out_simple_${path.basename(sourceFile, '.sol')}`,
               solc: "solc",
-              num_mutants: 10,
+              num_mutants: numMutants, // Use the provided numMutants
               // No remappings - let it fail gracefully if imports don't work
             };
             
@@ -764,7 +710,7 @@ export class GambitService {
         console.log(chalk.yellow('  • Solc compilation issues preventing mutation generation'));
         console.log(chalk.cyan('\nTroubleshooting suggestions:'));
         console.log(chalk.cyan('  • Try with a project using Solidity 0.8.19 or earlier'));
-        console.log(chalk.cyan('  • Ensure all imports resolve correctly with forge/hardhat'));
+        console.log(chalk.cyan('  • Ensure all imports resolve correctly with forge'));
         console.log(chalk.cyan('  • Check that solc can compile individual files'));
         console.log(chalk.cyan('  • Focus on files with actual logic (not just interfaces)'));
         
@@ -889,7 +835,7 @@ export class GambitService {
       await fs.copyFile(mutantFilePath, originalFilePath);
       
       // Step 3: Run tests
-      const testCommand = isForgeProject ? 'forge test' : 'npx hardhat test';
+      const testCommand = 'forge test';
       console.log(chalk.dim(`    Running: ${testCommand}`));
       
       try {
@@ -1160,7 +1106,7 @@ export class GambitService {
     
     if (mutantDirs.length === 0) {
       console.log(chalk.yellow('\n⚠️  Mutant files from previous run not found. Running full mutation test...'));
-      return await this.runMutationTestingWithoutSetup(projectPath);
+      return await this.runMutationTestingWithoutSetup(projectPath, 25);
     }
     
     // Re-test each survived mutation
@@ -1556,7 +1502,7 @@ export class GambitService {
     if (totalScore < 50) {
       recommendations.push("🔴 Critical: Very low mutation score. Consider adopting Test-Driven Development (TDD) practices.");
     } else if (totalScore < 75) {
-      recommendations.push("🟡 Moderate: Good start! Focus on testing error conditions and edge cases to improve coverage.");
+              recommendations.push("🟡 Moderate: Good start! Focus on testing error conditions and edge cases to improve test quality.");
     } else if (totalScore < 90) {
       recommendations.push("🟢 Good: Strong test suite! Focus on the specific survived mutations for final improvements.");
     }
@@ -1667,9 +1613,9 @@ ${recommendations.map((rec: string, index: number) => `${index + 1}. ${rec}`).jo
 
   private getScoreGrade(score: number): string {
     if (score >= 90) return '**Grade: A** - Exceptional test quality! Your tests are robust and comprehensive.';
-    if (score >= 80) return '**Grade: B** - Good test coverage with room for improvement in critical areas.';
-    if (score >= 70) return '**Grade: C** - Moderate test quality. Focus on security and edge case testing.';
-    if (score >= 60) return '**Grade: D** - Below average. Significant gaps in test coverage detected.';
+          if (score >= 80) return '**Grade: B** - Good test quality with room for improvement in critical areas.';
+      if (score >= 70) return '**Grade: C** - Moderate test quality. Focus on security and edge case testing.';
+      if (score >= 60) return '**Grade: D** - Below average. Significant gaps in test quality detected.';
     if (score >= 50) return '**Grade: F** - Poor test quality. Consider adopting Test-Driven Development.';
     return '**Grade: F** - Critical issues detected. Immediate attention required for production readiness.';
   }

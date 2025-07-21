@@ -24,7 +24,6 @@ secrets.json
 *.tmp
 *.temp
 .mutation-testing-temp/
-.coverage-analysis-temp/
 
 # Logs
 logs/
@@ -36,8 +35,7 @@ pids/
 *.seed
 *.pid.lock
 
-# Coverage directory used by tools like istanbul
-coverage/
+# Testing outputs
 .nyc_output/
 
 # IDE files
@@ -59,8 +57,7 @@ Thumbs.db
 # Test outputs
 gambit_out*/
 generated-tests/
-generated-coverage-tests/
-generated-mutation-tests/
+mutation-results/
 
 # TypeScript cache
 *.tsbuildinfo
