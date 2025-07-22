@@ -1,6 +1,6 @@
 {
   "name": "forge-mutation-tester",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Mutation testing tool for Solidity smart contracts using Gambit",
   "main": "dist/index.js",
   "bin": {

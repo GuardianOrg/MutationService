@@ -476,10 +476,10 @@ function displayFinalResults(analysis: any, guardianScore: number, generatedTest
   console.log(chalk.bold.green('\n✅ Mutation testing completed successfully!\n'));
   console.log(chalk.cyan('Results:'));
   console.log(`  • Guardian Mutation Score: ${guardianScore}/100 ${getScoreEmoji(guardianScore)}`);
-  console.log(`  • Total mutations: ${analysis.summary.totalMutations}`);
-  console.log(`  • Killed mutations: ${analysis.summary.killedMutations}`);
-  console.log(`  • Survived mutations: ${analysis.summary.survivedMutations}`);
-  console.log(`  • Basic mutation score: ${analysis.summary.mutationScore.toFixed(2)}%`);
+  console.log(`  • Total mutations: ${analysis.summary.totalMutants}`);
+  console.log(`  • Killed mutations: ${analysis.summary.killedMutants}`);
+  console.log(`  • Survived mutations: ${analysis.summary.survivedMutants}`);
+  console.log(`  • Basic mutation score: ${analysis.summary.basicMutationScore.toFixed(2)}%`);
   if (generatedTestsCount > 0) {
     console.log(`  • Generated test files: ${generatedTestsCount}`);
   }
