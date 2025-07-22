@@ -1,6 +1,8 @@
-# Forge Mutation Tester
+# 🛡️ Guardian Forge Mutation Tester
 
-An AI-powered mutation testing tool for Solidity smart contracts that automatically generates test cases to improve your test suite quality.
+> **Version 3.0.0** - Now with TOML configuration, optional AI features, and customizable mutation counts!
+
+A comprehensive mutation testing tool for Solidity smart contracts that helps identify weaknesses in your test suite. Uses [Gambit](https://github.com/Certora/gambit) for mutation generation and optionally leverages OpenAI for intelligent test generation.
 
 ## Overview
 
