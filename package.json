@@ -53,12 +53,14 @@
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
     "glob": "^10.3.10",
+    "minimatch": "^10.0.3",
     "openai": "^4.20.1",
     "ora": "^5.4.1",
     "simple-git": "^3.19.1",
     "toml": "^3.0.0"
   },
   "devDependencies": {
+    "@types/minimatch": "^6.0.0",
     "@types/node": "^20.8.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.2.2"

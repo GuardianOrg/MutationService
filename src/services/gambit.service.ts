@@ -5,6 +5,7 @@ import path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { MutationResult } from '../types';
+import { minimatch } from 'minimatch';
 
 const execAsync = promisify(exec);
 
@@ -268,7 +269,11 @@ export class GambitService {
     }
   }
 
-  async setupGambitConfigWithoutDependencies(projectPath: string): Promise<void> {
+  async setupGambitConfigWithoutDependencies(
+    projectPath: string,
+    includePatterns?: string[],
+    excludePatterns?: string[]
+  ): Promise<void> {
     const spinner = ora('Setting up Gambit configuration...').start();
     
     try {
@@ -312,13 +317,26 @@ export class GambitService {
         );
       });
 
-      if (sourceFiles.length === 0) {
-        throw new Error(`No source files found in ${sourceRoot} directory (after excluding test files)`);
+      // Apply custom include/exclude patterns if provided
+      const filteredFiles = this.filterFilesByPatterns(sourceFiles, includePatterns, excludePatterns);
+
+      if (filteredFiles.length === 0) {
+        const patternsMsg = includePatterns || excludePatterns 
+          ? ` (after applying custom patterns)` 
+          : ` (after excluding test files)`;
+        throw new Error(`No source files found in ${sourceRoot} directory${patternsMsg}`);
       }
 
-      console.log(chalk.dim(`  Found ${sourceFiles.length} source files (excluding ${allSolFiles.length - sourceFiles.length} test files)`));
+      console.log(chalk.blue(`🎯 Running mutation testing on ${filteredFiles.length} source files...`));
+      if (includePatterns && includePatterns.length > 0) {
+        console.log(chalk.dim(`  Include patterns: ${includePatterns.join(', ')}`));
+      }
+      if (excludePatterns && excludePatterns.length > 0) {
+        console.log(chalk.dim(`  Exclude patterns: ${excludePatterns.join(', ')}`));
+      }
+      console.log(chalk.dim('  Excluding test files from mutation testing'));
       
-      // Get proper remappings using forge remappings command
+      // Auto-detect essential remappings (full list causes Gambit to crash)
       let solcRemappings: string[] = [];
       try {
         if (isForgeProject) {
@@ -451,7 +469,49 @@ export class GambitService {
     }
   }
 
-  async runMutationTestingWithoutSetup(projectPath: string, numMutants: number = 25): Promise<MutationResult[]> {
+  /**
+   * Filter source files based on include/exclude patterns
+   * @param files List of files to filter
+   * @param includePatterns Optional glob patterns to include
+   * @param excludePatterns Optional glob patterns to exclude
+   * @returns Filtered list of files
+   */
+  private filterFilesByPatterns(
+    files: string[], 
+    includePatterns?: string[], 
+    excludePatterns?: string[]
+  ): string[] {
+    let filteredFiles = files;
+
+    // Apply include patterns if specified
+    if (includePatterns && includePatterns.length > 0) {
+      filteredFiles = filteredFiles.filter(file => {
+        // Check if file matches any include pattern
+        return includePatterns.some(pattern => 
+          minimatch(file, pattern, { matchBase: true })
+        );
+      });
+    }
+
+    // Apply exclude patterns if specified
+    if (excludePatterns && excludePatterns.length > 0) {
+      filteredFiles = filteredFiles.filter(file => {
+        // Check if file doesn't match any exclude pattern
+        return !excludePatterns.some(pattern => 
+          minimatch(file, pattern, { matchBase: true })
+        );
+      });
+    }
+
+    return filteredFiles;
+  }
+
+  async runMutationTestingWithoutSetup(
+    projectPath: string, 
+    numMutants: number = 25,
+    includePatterns?: string[],
+    excludePatterns?: string[]
+  ): Promise<MutationResult[]> {
     const spinner = ora('Running mutation testing...').start();
     
     try {
@@ -502,11 +562,23 @@ export class GambitService {
         );
       });
 
-      if (sourceFiles.length === 0) {
-        throw new Error(`No source files found in ${sourceRoot} directory (after excluding test files)`);
+      // Apply custom include/exclude patterns if provided
+      const filteredFiles = this.filterFilesByPatterns(sourceFiles, includePatterns, excludePatterns);
+
+      if (filteredFiles.length === 0) {
+        const patternsMsg = includePatterns || excludePatterns 
+          ? ` (after applying custom patterns)` 
+          : ` (after excluding test files)`;
+        throw new Error(`No source files found in ${sourceRoot} directory${patternsMsg}`);
       }
 
-      console.log(chalk.blue(`🎯 Running mutation testing on ${sourceFiles.length} source files...`));
+      console.log(chalk.blue(`🎯 Running mutation testing on ${filteredFiles.length} source files...`));
+      if (includePatterns && includePatterns.length > 0) {
+        console.log(chalk.dim(`  Include patterns: ${includePatterns.join(', ')}`));
+      }
+      if (excludePatterns && excludePatterns.length > 0) {
+        console.log(chalk.dim(`  Exclude patterns: ${excludePatterns.join(', ')}`));
+      }
       console.log(chalk.dim('  Excluding test files from mutation testing'));
       
       // Auto-detect essential remappings (full list causes Gambit to crash)
@@ -579,9 +651,9 @@ export class GambitService {
       spinner.text = 'Generating mutants for all source files...';
       const allMutants: any[] = [];
       
-      for (let i = 0; i < sourceFiles.length; i++) {
-        const sourceFile = sourceFiles[i];
-        console.log(chalk.cyan(`\n📄 Generating mutants for file ${i + 1}/${sourceFiles.length}: ${sourceFile}`));
+      for (let i = 0; i < filteredFiles.length; i++) {
+        const sourceFile = filteredFiles[i];
+        console.log(chalk.cyan(`\n📄 Generating mutants for file ${i + 1}/${filteredFiles.length}: ${sourceFile}`));
         
         try {
           // Configure to process ONE file at a time
@@ -714,10 +786,10 @@ export class GambitService {
         console.log(chalk.cyan('  • Check that solc can compile individual files'));
         console.log(chalk.cyan('  • Focus on files with actual logic (not just interfaces)'));
         
-        throw new Error(`No mutants were generated from ${sourceFiles.length} source files. See troubleshooting suggestions above.`);
+        throw new Error(`No mutants were generated from ${filteredFiles.length} source files. See troubleshooting suggestions above.`);
       }
       
-      console.log(chalk.blue(`\n🧬 Generated ${allMutants.length} mutants across ${sourceFiles.length} files`));
+      console.log(chalk.blue(`\n🧬 Generated ${allMutants.length} mutants across ${filteredFiles.length} files`));
       console.log(chalk.blue(`\n🧪 Now testing each mutant to see which ones are killed...`));
       
       // Step 2: Test each mutant to determine if it's killed or survived
@@ -1106,7 +1178,7 @@ export class GambitService {
     
     if (mutantDirs.length === 0) {
       console.log(chalk.yellow('\n⚠️  Mutant files from previous run not found. Running full mutation test...'));
-      return await this.runMutationTestingWithoutSetup(projectPath, 25);
+      return await this.runMutationTestingWithoutSetup(projectPath, 25, undefined, undefined);
     }
     
     // Re-test each survived mutation

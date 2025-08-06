@@ -31,4 +31,28 @@ local_path = "./my-solidity-project"
 # iterative = true  # Set to false to run only once
 
 # Optional: Number of mutants to generate per file (defaults to 25)
-# num_mutants = 25  # Increase for more thorough testing, decrease for faster runs 
+# num_mutants = 25  # Increase for more thorough testing, decrease for faster runs
+
+[files]
+# Optional: File filtering for large repositories
+# Use glob patterns to include or exclude specific files from mutation testing
+
+# Include only specific files or directories (if not specified, all files are included)
+# include = [
+#   "src/core/**/*.sol",        # All Solidity files in src/core and subdirectories
+#   "src/utils/Math*.sol",      # All Math-related files in src/utils
+#   "contracts/Token.sol"       # Specific single file
+# ]
+
+# Exclude specific files or directories (applied after include patterns)
+# exclude = [
+#   "**/*Test.sol",             # All test files
+#   "**/*Mock*.sol",            # All mock contracts
+#   "**/test/**",               # Everything in test directories
+#   "**/interfaces/**",         # Interface files (no implementation to mutate)
+#   "contracts/deprecated/**"   # Deprecated contracts
+# ]
+
+# Example for focusing on critical contracts only:
+# include = ["contracts/core/**/*.sol", "contracts/governance/**/*.sol"]
+# exclude = ["**/*Test.sol", "**/mocks/**"] 

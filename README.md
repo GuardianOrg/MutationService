@@ -1,6 +1,6 @@
 # 🛡️ Guardian Forge Mutation Tester
 
-> **Version 3.0.0** - Now with TOML configuration, optional AI features, and customizable mutation counts!
+> **Version 3.0.0** - Now with TOML configuration, optional AI features, customizable mutation counts, and file filtering for large repositories!
 
 A comprehensive mutation testing tool for Solidity smart contracts that helps identify weaknesses in your test suite. Uses [Gambit](https://github.com/Certora/gambit) for mutation generation and optionally leverages OpenAI for intelligent test generation.
 
@@ -16,6 +16,7 @@ Forge Mutation Tester uses [Gambit](https://github.com/Certora/gambit) to perfor
 - 🔄 **Iterative Testing**: Re-run mutation testing after adding tests to track improvement
 - 📁 **Local & Remote Repos**: Works with both local projects and GitHub repositories
 - 🎯 **Forge/Foundry Focused**: Optimized specifically for Forge/Foundry projects
+- 🔍 **File Filtering**: Target specific files or directories in large repositories using glob patterns
 
 ## Prerequisites
 
@@ -64,6 +65,12 @@ cleanup = true  # Optional, only for remote repos
 
 [testing]
 # iterative = true  # Optional, defaults to true
+# num_mutants = 25  # Optional, defaults to 25
+
+[files]
+# Optional: Filter files for large repositories
+# include = ["src/core/**/*.sol"]  # Only test matching patterns
+# exclude = ["**/*Test.sol"]  # Skip these patterns
 ```
 
 ### Quick Start
@@ -102,6 +109,50 @@ branch = "master"
 [openai]
 api_key = "sk-your-key-here"
 ```
+
+### Testing Specific Files in Large Repositories
+
+For large repositories, you can focus mutation testing on specific files or directories:
+
+```toml
+[repository]
+local_path = "./my-large-defi-protocol"
+
+[files]
+# Only test core contracts and governance
+include = [
+  "contracts/core/**/*.sol",
+  "contracts/governance/**/*.sol",
+  "contracts/tokens/MainToken.sol"
+]
+
+# Skip test files, mocks, and deprecated code
+exclude = [
+  "**/*Test.sol",
+  "**/test/**",
+  "**/mocks/**",
+  "contracts/deprecated/**",
+  "**/interfaces/**"  # Interfaces have no implementation to mutate
+]
+
+[openai]
+api_key = "sk-your-key-here"
+```
+
+#### File Pattern Syntax
+
+The file filtering uses glob patterns:
+- `**` - Matches any number of directories
+- `*` - Matches any characters in a filename
+- `?` - Matches a single character
+- `[abc]` - Matches any character in the brackets
+- `{a,b}` - Matches either pattern a or b
+
+Common patterns:
+- `src/**/*.sol` - All Solidity files in src and subdirectories
+- `contracts/Token*.sol` - All files starting with "Token" in contracts/
+- `**/*Test.sol` - All test files in any directory
+- `**/interfaces/**` - All files in any interfaces directory
 
 ### Iterative Testing Mode
 

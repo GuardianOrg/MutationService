@@ -72,7 +72,9 @@ program
         model: config.openai?.model || 'gpt-4-turbo-preview',
         cleanup: config.output?.cleanup !== false, // Default true
         iterative: config.testing?.iterative !== false,  // Default true
-        numMutants: config.testing?.num_mutants || 25    // Default 25
+        numMutants: config.testing?.num_mutants || 25,    // Default 25
+        includePatterns: config.files?.include,  // File patterns to include
+        excludePatterns: config.files?.exclude   // File patterns to exclude
       };
 
       if (options.verbose) {
@@ -116,6 +118,11 @@ local_path = "./path/to/your/project"
 [testing]
 # iterative = true  # Optional, defaults to true (set to false to disable)
 # num_mutants = 25  # Optional, defaults to 25 mutants per file
+
+[files]
+# Optional: File filtering for large repositories
+# include = ["src/core/**/*.sol", "src/utils/**/*.sol"]  # Only test these patterns
+# exclude = ["**/*Test.sol", "**/mocks/**"]  # Skip these patterns
 `;
 
     const configPath = 'mutation-config.toml';

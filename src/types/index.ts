@@ -9,6 +9,8 @@ export interface RunOptions {
   cleanup: boolean;
   iterative?: boolean;
   numMutants?: number;  // Number of mutants per file
+  includePatterns?: string[];  // File patterns to include
+  excludePatterns?: string[];  // File patterns to exclude
 }
 
 export interface MutationConfig {
@@ -36,6 +38,12 @@ export interface MutationConfig {
   testing?: {
     iterative?: boolean;    // Enable iterative mode (default: true)
     num_mutants?: number;   // Number of mutants to generate per file (default: 25)
+  };
+  
+  // File filtering configuration
+  files?: {
+    include?: string[];     // Glob patterns for files to include (e.g., ["src/core/**/*.sol"])
+    exclude?: string[];     // Glob patterns for files to exclude (e.g., ["**/*Test.sol", "**/mocks/**"])
   };
 }
 

@@ -47,6 +47,11 @@ cleanup = true                            # Optional (remote only)
 [testing]
 # iterative = true                        # Default, set to false for single run
 # num_mutants = 25                        # Number of mutants per file (default: 25)
+
+[files]
+# Optional - filter which files to test
+include = ["src/**/*.sol"]                # Glob patterns to include
+exclude = ["**/*Test.sol"]                # Glob patterns to exclude
 ```
 
 ## Common Use Cases
@@ -104,6 +109,133 @@ api_key = "sk-your-key"
 [testing]
 # iterative = true  # Default, re-run after adding tests
 # num_mutants = 50  # Generate more mutants for thorough testing
+```
+
+### 5. Large Repository with File Filtering
+
+For large repositories, use file filtering to focus on specific areas:
+
+```toml
+[repository]
+local_path = "./large-defi-protocol"
+
+[files]
+# Focus on critical contracts only
+include = [
+  "contracts/core/**/*.sol",      # All core contracts
+  "contracts/lending/**/*.sol",   # Lending logic
+  "contracts/governance/*.sol"    # Governance (not subdirs)
+]
+
+# Exclude non-essential files
+exclude = [
+  "**/*Test.sol",                 # Test files
+  "**/*Mock*.sol",                # Mock contracts
+  "**/interfaces/**",             # Interface definitions
+  "contracts/deprecated/**",      # Old contracts
+  "contracts/examples/**"         # Example code
+]
+
+[openai]
+api_key = "sk-your-key"
+
+[testing]
+num_mutants = 10  # Fewer mutants per file for faster iteration
+```
+
+## File Filtering Guide
+
+### Why Use File Filtering?
+
+File filtering is essential for:
+- **Large repositories**: Focus testing on critical components
+- **Faster iteration**: Test specific modules during development
+- **Resource optimization**: Reduce API costs and computation time
+- **Incremental testing**: Test new features or recent changes
+
+### Pattern Syntax
+
+The tool uses glob patterns (wildcards) for flexible file matching:
+
+| Pattern | Description | Example |
+|---------|-------------|---------|
+| `*` | Matches any characters (except `/`) | `Token*.sol` matches `TokenA.sol`, `TokenVault.sol` |
+| `**` | Matches any number of directories | `src/**/*.sol` matches all `.sol` files under `src/` |
+| `?` | Matches exactly one character | `Token?.sol` matches `TokenA.sol`, not `TokenAB.sol` |
+| `[abc]` | Matches any character in brackets | `Token[ABC].sol` matches `TokenA.sol`, `TokenB.sol`, `TokenC.sol` |
+| `[!abc]` | Matches any character NOT in brackets | `Token[!X].sol` matches `TokenA.sol`, not `TokenX.sol` |
+| `{a,b}` | Matches either pattern | `{Token,Vault}.sol` matches `Token.sol` or `Vault.sol` |
+
+### Common Use Cases
+
+#### 1. Test Only Core Contracts
+```toml
+[files]
+include = ["contracts/core/**/*.sol"]
+exclude = ["**/*Test.sol"]
+```
+
+#### 2. Test Recent Changes
+```toml
+[files]
+# Test only v2 contracts
+include = ["contracts/v2/**/*.sol"]
+exclude = ["contracts/v1/**/*.sol"]
+```
+
+#### 3. Focus on Security-Critical Code
+```toml
+[files]
+include = [
+  "contracts/*Vault*.sol",        # All vault contracts
+  "contracts/*Treasury*.sol",     # Treasury management
+  "contracts/access/**/*.sol"     # Access control
+]
+```
+
+#### 4. Exclude Generated/External Code
+```toml
+[files]
+exclude = [
+  "contracts/generated/**",       # Auto-generated code
+  "contracts/vendor/**",          # Third-party code
+  "**/node_modules/**"           # Dependencies
+]
+```
+
+#### 5. Module-Specific Testing
+```toml
+[files]
+# Test only the AMM module
+include = ["contracts/amm/**/*.sol"]
+exclude = [
+  "**/interfaces/**",
+  "**/*Helper.sol",
+  "**/*Test.sol"
+]
+```
+
+### Best Practices for File Filtering
+
+1. **Start Broad, Then Narrow**: Begin with all files, identify problem areas, then focus
+2. **Exclude Interfaces**: Interface files have no implementation to mutate
+3. **Skip Test Files**: Test contracts shouldn't be mutation tested
+4. **Focus on Logic**: Prioritize contracts with complex business logic
+5. **Iterative Refinement**: Adjust patterns based on initial results
+
+### Pattern Priority
+
+When both `include` and `exclude` patterns are specified:
+1. First, files are filtered by `include` patterns (if specified)
+2. Then, matching files are filtered by `exclude` patterns
+3. The result is the final set of files to test
+
+Example:
+```toml
+[files]
+include = ["contracts/**/*.sol"]  # All Solidity files in contracts/
+exclude = ["**/test/**"]          # But not in test directories
+# Result: All .sol files in contracts/ except those in test/ subdirectories
 ```
 
 ## Iterative Testing Workflow
@@ -198,6 +330,32 @@ num_mutants = 50   # Thorough testing with more mutants
 ```
 
 The default is 25 mutants per file, which provides a good balance between thoroughness and speed.
+
+### Adjusting for Repository Size
+
+For different repository sizes, consider these configurations:
+
+#### Small Projects (< 10 files)
+```toml
+[testing]
+num_mutants = 50  # More thorough testing
+```
+
+#### Medium Projects (10-50 files)
+```toml
+[testing]
+num_mutants = 25  # Default - balanced approach
+```
+
+#### Large Projects (50+ files)
+```toml
+[testing]
+num_mutants = 10  # Faster iteration
+
+[files]
+# Use filtering to focus on specific areas
+include = ["contracts/core/**/*.sol"]
+```
 
 ## Stored Results
 

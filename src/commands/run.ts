@@ -170,8 +170,13 @@ async function runSingleMutationTest(
 ): Promise<MutationSession> {
   // Step 3: Setup and run mutation testing
   console.log(chalk.bold('\nStep 3: Setting up and running mutation tests...'));
-  await gambitService.setupGambitConfigWithoutDependencies(repoPath);
-  const mutationResults = await gambitService.runMutationTestingWithoutSetup(repoPath, options.numMutants);
+  await gambitService.setupGambitConfigWithoutDependencies(repoPath, options.includePatterns, options.excludePatterns);
+  const mutationResults = await gambitService.runMutationTestingWithoutSetup(
+    repoPath, 
+    options.numMutants,
+    options.includePatterns,
+    options.excludePatterns
+  );
   
   // Add timestamp to results
   const timestampedResults = mutationResults.map(r => ({
@@ -291,11 +296,16 @@ async function runIterativeMutationTesting(
     
     // Run mutation testing
     console.log(chalk.bold(`Running mutation tests (iteration ${iteration})...`));
-    await gambitService.setupGambitConfigWithoutDependencies(repoPath);
+    await gambitService.setupGambitConfigWithoutDependencies(repoPath, options.includePatterns, options.excludePatterns);
     
     // For first iteration, run full test. For subsequent, we could optimize to only test survived
     const mutationResults = iteration === 1 
-      ? await gambitService.runMutationTestingWithoutSetup(repoPath, options.numMutants)
+      ? await gambitService.runMutationTestingWithoutSetup(
+          repoPath, 
+          options.numMutants,
+          options.includePatterns,
+          options.excludePatterns
+        )
       : await gambitService.retestSurvivedMutations(repoPath, allMutationResults);
     
     // Store results for next iteration
